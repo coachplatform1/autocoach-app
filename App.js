@@ -1,5 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity,
   SafeAreaView, Platform, ScrollView,
@@ -7,6 +7,7 @@ import {
   KeyboardAvoidingView, Modal, FlatList,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+// expo-camera integrated during production build
 import { TRANSLATIONS } from './src/translations/TRANSLATIONS';
 import { COLORS } from './src/constants/colors';
 import {
@@ -96,6 +97,7 @@ export default function App() {
   const [vehicleLimit, setVehicleLimit]     = useState(0);
 
   const T = (key) => TRANSLATIONS[key]?.[lang] ?? key;
+  const [cameraPermission, setCameraPermission] = useState(null);
 
   useEffect(() => {
     AsyncStorage.getItem('autocoach_lang').then(s => { if (s) setLang(s); });
@@ -465,7 +467,9 @@ export default function App() {
     const [mileage, setMileage]         = useState('');
     const [gallons, setGallons]         = useState('');
     const [pricePerGal, setPricePerGal] = useState('');
-    const [selectedVehicleIndex, setSelectedVehicleIndex] = useState(0);
+    const [showCamera, setShowCamera]   = useState(false);
+    const [odometerPhoto, setOdometerPhoto] = useState(null);
+    const cameraRef = useRef(null);
 
     // Filter fuel log for active vehicle
     const activeVehicleKey = activeVehicle
@@ -480,6 +484,48 @@ export default function App() {
       const miles = sorted[sorted.length - 1].mileage - sorted[0].mileage;
       const gallonsTotal = sorted.slice(1).reduce((sum, e) => sum + e.gallons, 0);
       if (gallonsTotal === 0) return null;
+      // Camera view
+    if (showCamera) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+          <view
+            ref={cameraRef}
+            style={{ flex: 1 }}
+            facing="back"
+          >
+            <View style={cs.cameraOverlay}>
+              <Text style={cs.cameraTitle}>
+                {lang === 'EN' ? 'Frame your odometer' : 'Encuadra tu odómetro'}
+              </Text>
+              <View style={cs.cameraFrame} />
+              <View style={cs.cameraControls}>
+                <TouchableOpacity
+                  style={cs.cameraCancelBtn}
+                  onPress={() => setShowCamera(false)}
+                >
+                  <Text style={cs.cameraCancelText}>
+                    {lang === 'EN' ? 'Cancel' : 'Cancelar'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={cs.cameraShootBtn}
+                  onPress={async () => {
+                    if (cameraRef.current) {
+                      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7 });
+                      setOdometerPhoto(photo.uri);
+                      setShowCamera(false);
+                    }
+                  }}
+                >
+                  <Text style={cs.cameraShootIcon}>📸</Text>
+                </TouchableOpacity>
+                <View style={{ width: 80 }} />
+              </View>
+            </View>
+          </view>
+        </View>
+      );
+    }
       return (miles / gallonsTotal).toFixed(1);
     }
 
@@ -506,8 +552,9 @@ export default function App() {
         gallons:      gals,
         pricePerGal:  price,
         totalCost:    total,
-        date:         new Date().toISOString(),
-        dateDisplay:  new Date().toLocaleString(),
+        date:          new Date().toISOString(),
+        dateDisplay:   new Date().toLocaleString(),
+        odometerPhoto: odometerPhoto || null,
       };
 
       const updated = [entry, ...fuelLog];
@@ -607,7 +654,23 @@ export default function App() {
                 />
               </View>
             </View>
-
+{/* Odometer photo */}
+            <Text style={s.fieldLabel}>
+              {lang === 'EN' ? 'Odometer photo (optional)' : 'Foto del odómetro (opcional)'}
+            </Text>
+            <TouchableOpacity
+              style={cs.photoBtn}
+              onPress={async () => {
+                setShowCamera(true);
+              }}
+            >
+              <Text style={cs.photoBtnText}>
+                {odometerPhoto
+                  ? (lang === 'EN' ? '📸 Photo captured — tap to retake' : '📸 Foto capturada — toca para repetir')
+                  : (lang === 'EN' ? '📸 Take odometer photo' : '📸 Tomar foto del odómetro')
+                }
+              </Text>
+            </TouchableOpacity>
             <Text style={s.fieldLabel}>{lang === 'EN' ? 'Price per gallon (optional)' : 'Precio por galón (opcional)'}</Text>
             <TextInput
               style={s.input}
@@ -954,4 +1017,71 @@ const s = StyleSheet.create({
   upsideBannerTitle:{ color: COLORS.white, fontSize: 15, fontWeight: '700', marginBottom: 4 },
   upsideBannerBody: { color: 'rgba(255,255,255,0.7)', fontSize: 13, marginBottom: 8 },
   upsideBannerCta:  { color: COLORS.accent, fontSize: 13, fontWeight: '600' },
+});
+
+const cs = StyleSheet.create({
+  cameraOverlay: {
+    flex: 1,
+    justifyContent: 'space-between',
+    padding: 24,
+    paddingTop: 60,
+  },
+  cameraTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowRadius: 4,
+    textShadowOffset: { width: 0, height: 1 },
+  },
+  cameraFrame: {
+    alignSelf: 'center',
+    width: 280,
+    height: 120,
+    borderWidth: 2,
+    borderColor: COLORS.accent,
+    borderRadius: 12,
+    backgroundColor: 'transparent',
+  },
+  cameraControls: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 40,
+  },
+  cameraCancelBtn: {
+    width: 80,
+    alignItems: 'center',
+  },
+  cameraCancelText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  cameraShootBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#fff',
+  },
+  cameraShootIcon: {
+    fontSize: 32,
+  },
+  photoBtn: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  photoBtnText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '500',
+  },
 });
