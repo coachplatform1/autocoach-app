@@ -1,153 +1,27 @@
 import { StatusBar } from 'expo-status-bar';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity,
   SafeAreaView, Platform, ScrollView,
-  TextInput, ActivityIndicator, Alert,
-  KeyboardAvoidingView, Modal, FlatList,
+  TextInput, ActivityIndicator, Alert, KeyboardAvoidingView,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TRANSLATIONS } from './src/translations/TRANSLATIONS';
 import { COLORS } from './src/constants/colors';
-import {
-  decodeVIN,
-  getMaintenanceSchedule,
-  calculateDueServices,
-  getAllMakes,
-  getModelsForMake,
-  getEnginesForMakeModel,
-  getYearsForMakeModel,
-} from './src/data/vehicleDatabase';
+import { decodeVIN, getMaintenanceSchedule, calculateDueServices } from './src/data/vehicleDatabase';
 
-// ─────────────────────────────────────────────
-// SCROLL PICKER COMPONENT
-// Native-feeling scroll wheel selector
-// ─────────────────────────────────────────────
-function ScrollPicker({ items, selectedValue, onSelect, label, placeholder, lang }) {
-  const [modalVisible, setModalVisible] = useState(false);
-
-  return (
-    <>
-      <TouchableOpacity
-        style={sp.trigger}
-        onPress={() => items.length > 0 && setModalVisible(true)}
-        activeOpacity={0.7}
-      >
-        <Text style={selectedValue ? sp.triggerValue : sp.triggerPlaceholder}>
-          {selectedValue || placeholder}
-        </Text>
-        <Text style={sp.triggerArrow}>›</Text>
-      </TouchableOpacity>
-
-      <Modal
-        visible={modalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <TouchableOpacity
-          style={sp.backdrop}
-          activeOpacity={1}
-          onPress={() => setModalVisible(false)}
-        />
-        <View style={sp.sheet}>
-          <View style={sp.sheetHeader}>
-            <Text style={sp.sheetTitle}>{label}</Text>
-            <TouchableOpacity onPress={() => setModalVisible(false)}>
-              <Text style={sp.sheetDone}>{lang === 'ES' ? 'Listo' : 'Done'}</Text>
-            </TouchableOpacity>
-          </View>
-          <FlatList
-            data={items}
-            keyExtractor={(item, i) => String(i)}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[sp.item, item === selectedValue && sp.itemSelected]}
-                onPress={() => {
-                  onSelect(item);
-                  setModalVisible(false);
-                }}
-              >
-                <Text style={[sp.itemText, item === selectedValue && sp.itemTextSelected]}>
-                  {item}
-                </Text>
-                {item === selectedValue && (
-                  <Text style={sp.itemCheck}>✓</Text>
-                )}
-              </TouchableOpacity>
-            )}
-          />
-        </View>
-      </Modal>
-    </>
-  );
-}
-
-const sp = StyleSheet.create({
-  trigger: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: COLORS.bodyBg,
-    borderRadius: 8,
-    borderWidth: 0.5,
-    borderColor: COLORS.border,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    marginBottom: 2,
-  },
-  triggerValue:       { fontSize: 15, color: COLORS.textPrimary, flex: 1 },
-  triggerPlaceholder: { fontSize: 15, color: COLORS.textMuted, flex: 1 },
-  triggerArrow:       { fontSize: 18, color: COLORS.textMuted },
-  backdrop:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)' },
-  sheet: {
-    backgroundColor: COLORS.cardBg,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    maxHeight: '60%',
-    paddingBottom: Platform.OS === 'ios' ? 30 : 16,
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 0.5,
-    borderBottomColor: COLORS.border,
-  },
-  sheetTitle:    { fontSize: 16, fontWeight: '600', color: COLORS.textNavy },
-  sheetDone:     { fontSize: 16, fontWeight: '600', color: COLORS.accent },
-  item: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 0.5,
-    borderBottomColor: COLORS.border,
-  },
-  itemSelected:     { backgroundColor: COLORS.okBg },
-  itemText:         { fontSize: 15, color: COLORS.textPrimary },
-  itemTextSelected: { color: COLORS.primary, fontWeight: '600' },
-  itemCheck:        { fontSize: 16, color: COLORS.okText, fontWeight: '700' },
-});
-
-
-// ─────────────────────────────────────────────
-// MAIN APP
-// ─────────────────────────────────────────────
 export default function App() {
-  const [lang, setLang]                     = useState('EN');
-  const [vehicles, setVehicles]             = useState([]);
-  const [activeTab, setActiveTab]           = useState('garage');
-  const [activeVehicle, setActiveVehicle]   = useState(null);
+  const [lang, setLang]                   = useState('EN');
+  const [vehicles, setVehicles]           = useState([]);
+  const [activeTab, setActiveTab]         = useState('garage');
+  const [activeVehicle, setActiveVehicle] = useState(null);
   const [serviceHistory, setServiceHistory] = useState({});
-  const [isPro, setIsPro]                   = useState(false);
-  const [vehicleLimit, setVehicleLimit]     = useState(0);
+  const [isPro, setIsPro]                 = useState(false);
+  const [vehicleLimit, setVehicleLimit]   = useState(0);
 
   const T = (key) => TRANSLATIONS[key]?.[lang] ?? key;
 
+  // ── Load saved data ──────────────────────────
   useEffect(() => {
     AsyncStorage.getItem('autocoach_lang').then(s => { if (s) setLang(s); });
     AsyncStorage.getItem('autocoach_vehicles').then(s => { if (s) setVehicles(JSON.parse(s)); });
@@ -172,6 +46,22 @@ export default function App() {
     setActiveTab('garage');
   }
 
+  // ── Log a service ────────────────────────────
+  function logService(vehicleKey, serviceId, mileage) {
+    const updated = {
+      ...serviceHistory,
+      [vehicleKey]: {
+        ...(serviceHistory[vehicleKey] || {}),
+        [serviceId]: {
+          lastMileage: mileage,
+          lastDate: new Date().toISOString(),
+        }
+      }
+    };
+    setServiceHistory(updated);
+    AsyncStorage.setItem('autocoach_service_history', JSON.stringify(updated));
+  }
+
   // ─────────────────────────────────────────────
   // SCREEN ROUTER
   // ─────────────────────────────────────────────
@@ -191,6 +81,7 @@ export default function App() {
   // GARAGE SCREEN
   // ─────────────────────────────────────────────
   function GarageScreen() {
+    // Count overdue services across all vehicles
     let totalDue = 0;
     vehicles.forEach(v => {
       const schedule = getMaintenanceSchedule(v.make, v.model, v.engine);
@@ -203,6 +94,7 @@ export default function App() {
 
     return (
       <ScrollView style={s.screen} contentContainerStyle={s.screenContent}>
+
         <View style={s.statRow}>
           <View style={s.statCard}>
             <Text style={s.statVal}>{vehicles.length}</Text>
@@ -231,7 +123,8 @@ export default function App() {
           vehicles.map((vehicle, index) => {
             const schedule = getMaintenanceSchedule(vehicle.make, vehicle.model, vehicle.engine);
             const vKey = `${vehicle.year}_${vehicle.make}_${vehicle.model}`;
-            let overdueCount = 0, soonCount = 0;
+            let overdueCount = 0;
+            let soonCount = 0;
             if (schedule && vehicle.mileage) {
               const due = calculateDueServices(schedule.services, Number(vehicle.mileage), serviceHistory[vKey] || {});
               overdueCount = due.filter(s => s.status === 'overdue').length;
@@ -245,17 +138,25 @@ export default function App() {
               >
                 <View style={s.vehicleCardHeader}>
                   <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={s.vehicleName}>{vehicle.year} {vehicle.make} {vehicle.model}</Text>
+                    <Text style={s.vehicleName}>
+                      {vehicle.year} {vehicle.make} {vehicle.model}
+                    </Text>
                     <Text style={s.vehicleSub}>
                       {vehicle.engine}{vehicle.mileage ? ' · ' + Number(vehicle.mileage).toLocaleString() + ' mi' : ''}
                     </Text>
                   </View>
                   {overdueCount > 0 ? (
-                    <View style={s.badgeOd}><Text style={s.badgeOdText}>{overdueCount} {T('svc_status_overdue')}</Text></View>
+                    <View style={s.badgeOd}>
+                      <Text style={s.badgeOdText}>{overdueCount} {T('svc_status_overdue')}</Text>
+                    </View>
                   ) : soonCount > 0 ? (
-                    <View style={s.badgeSoon}><Text style={s.badgeSoonText}>{soonCount} {T('svc_status_due_soon')}</Text></View>
+                    <View style={s.badgeSoon}>
+                      <Text style={s.badgeSoonText}>{soonCount} {T('svc_status_due_soon')}</Text>
+                    </View>
                   ) : (
-                    <View style={s.badgeOk}><Text style={s.badgeOkText}>{T('garage_all_current')}</Text></View>
+                    <View style={s.badgeOk}>
+                      <Text style={s.badgeOkText}>{T('garage_all_current')}</Text>
+                    </View>
                   )}
                 </View>
               </TouchableOpacity>
@@ -268,6 +169,7 @@ export default function App() {
             <Text style={s.addVehicleBtnSecondaryText}>+ {T('garage_add_vehicle')}</Text>
           </TouchableOpacity>
         )}
+
       </ScrollView>
     );
   }
@@ -294,12 +196,16 @@ export default function App() {
 
     let services = [];
     if (schedule) {
-      services = calculateDueServices(schedule.services, currentMileage, serviceHistory[vKey] || {});
+      services = calculateDueServices(
+        schedule.services,
+        currentMileage,
+        serviceHistory[vKey] || {}
+      );
     }
 
-    const overdue = services.filter(s => s.status === 'overdue');
-    const soon    = services.filter(s => s.status === 'due_soon');
-    const ok      = services.filter(s => s.status === 'ok');
+    const overdue  = services.filter(s => s.status === 'overdue');
+    const soon     = services.filter(s => s.status === 'due_soon');
+    const ok       = services.filter(s => s.status === 'ok');
 
     function ServiceRow({ svc }) {
       const isOd   = svc.status === 'overdue';
@@ -329,6 +235,8 @@ export default function App() {
 
     return (
       <ScrollView style={s.screen} contentContainerStyle={s.screenContent}>
+
+        {/* Vehicle selector header */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.vehicleChipRow}>
           {vehicles.map((v, i) => (
             <TouchableOpacity
@@ -343,87 +251,97 @@ export default function App() {
           ))}
         </ScrollView>
 
+        {/* Vehicle info */}
         <View style={s.scheduleHeader}>
-          <Text style={s.scheduleVehicleName}>{activeVehicle.year} {activeVehicle.make} {activeVehicle.model}</Text>
+          <Text style={s.scheduleVehicleName}>
+            {activeVehicle.year} {activeVehicle.make} {activeVehicle.model}
+          </Text>
           <Text style={s.scheduleVehicleSub}>
-            {activeVehicle.engine}{currentMileage ? ' · ' + currentMileage.toLocaleString() + ' mi' : ''}
+            {activeVehicle.engine}
+            {currentMileage ? ' · ' + currentMileage.toLocaleString() + ' mi' : ''}
           </Text>
           {schedule?.oilSpec && (
             <Text style={s.oilSpec}>
               {lang === 'EN' ? 'Oil:' : 'Aceite:'} {schedule.oilSpec} · {schedule.oilQty}
             </Text>
           )}
-          {!schedule && (
-            <Text style={{ fontSize: 12, color: COLORS.accentDark, marginTop: 6 }}>
-              {lang === 'EN' ? 'Vehicle not found in database — check make/model spelling' : 'Vehículo no encontrado — verifica la marca/modelo'}
-            </Text>
-          )}
         </View>
 
+        {/* No schedule found */}
+        {!schedule && (
+          <View style={s.card}>
+            <Text style={s.cardNote}>
+              {lang === 'EN'
+                ? `No schedule found for ${activeVehicle.year} ${activeVehicle.make} ${activeVehicle.model}. Try editing the vehicle details or request this vehicle be added.`
+                : `No se encontró programa para ${activeVehicle.year} ${activeVehicle.make} ${activeVehicle.model}. Edita los detalles del vehículo o solicita que se agregue.`
+              }
+            </Text>
+          </View>
+        )}
+
+        {/* Overdue services */}
         {overdue.length > 0 && (
           <View style={s.serviceSection}>
-            <Text style={s.serviceSectionTitle}>🔴 {T('svc_status_overdue')} ({overdue.length})</Text>
-            <View style={s.card}>{overdue.map((svc, i) => <ServiceRow key={i} svc={svc} />)}</View>
+            <Text style={s.serviceSectionTitle}>
+              🔴 {T('svc_status_overdue')} ({overdue.length})
+            </Text>
+            <View style={s.card}>
+              {overdue.map((svc, i) => <ServiceRow key={i} svc={svc} />)}
+            </View>
           </View>
         )}
+
+        {/* Due soon services */}
         {soon.length > 0 && (
           <View style={s.serviceSection}>
-            <Text style={s.serviceSectionTitle}>🟡 {T('svc_status_due_soon')} ({soon.length})</Text>
-            <View style={s.card}>{soon.map((svc, i) => <ServiceRow key={i} svc={svc} />)}</View>
+            <Text style={s.serviceSectionTitle}>
+              🟡 {T('svc_status_due_soon')} ({soon.length})
+            </Text>
+            <View style={s.card}>
+              {soon.map((svc, i) => <ServiceRow key={i} svc={svc} />)}
+            </View>
           </View>
         )}
+
+        {/* OK services */}
         {ok.length > 0 && (
           <View style={s.serviceSection}>
-            <Text style={s.serviceSectionTitle}>🟢 {T('svc_status_ok')} ({ok.length})</Text>
-            <View style={s.card}>{ok.map((svc, i) => <ServiceRow key={i} svc={svc} />)}</View>
+            <Text style={s.serviceSectionTitle}>
+              🟢 {T('svc_status_ok')} ({ok.length})
+            </Text>
+            <View style={s.card}>
+              {ok.map((svc, i) => <ServiceRow key={i} svc={svc} />)}
+            </View>
           </View>
         )}
+
+        {/* Notes */}
         {schedule?.notes && (
           <View style={[s.card, { backgroundColor: COLORS.recallBg, borderColor: COLORS.recallBorder }]}>
-            <Text style={{ fontSize: 13, color: COLORS.accentDark, lineHeight: 18 }}>⚠ {schedule.notes}</Text>
+            <Text style={{ fontSize: 13, color: COLORS.accentDark, lineHeight: 18 }}>
+              ⚠ {schedule.notes}
+            </Text>
           </View>
         )}
+
       </ScrollView>
     );
   }
 
   // ─────────────────────────────────────────────
-  // ADD VEHICLE SCREEN — with scroll pickers
+  // ADD VEHICLE SCREEN
   // ─────────────────────────────────────────────
   function AddVehicleScreen() {
-    const [mode, setMode]             = useState('manual'); // manual only — VIN is bonus
+    const [mode, setMode]             = useState('vin');
     const [vin, setVin]               = useState('');
     const [vinLoading, setVinLoading] = useState(false);
     const [vinResult, setVinResult]   = useState(null);
-
-    // Picker state
-    const [selectedMake,   setSelectedMake]   = useState('');
-    const [selectedModel,  setSelectedModel]  = useState('');
-    const [selectedEngine, setSelectedEngine] = useState('');
-    const [selectedYear,   setSelectedYear]   = useState('');
-    const [mileage,        setMileage]         = useState('');
-    const [nickname,       setNickname]        = useState('');
-
-    // Derived picker lists
-    const allMakes   = getAllMakes();
-    const allModels  = selectedMake  ? getModelsForMake(selectedMake) : [];
-    const allEngines = (selectedMake && selectedModel) ? getEnginesForMakeModel(selectedMake, selectedModel) : [];
-    const allYears   = (selectedMake && selectedModel)
-      ? getYearsForMakeModel(selectedMake, selectedModel).map(String).sort((a,b) => b-a)
-      : [];
-
-    // When make changes reset downstream
-    function onMakeSelect(make) {
-      setSelectedMake(make);
-      setSelectedModel('');
-      setSelectedEngine('');
-      setSelectedYear('');
-    }
-    function onModelSelect(model) {
-      setSelectedModel(model);
-      setSelectedEngine('');
-      setSelectedYear('');
-    }
+    const [year, setYear]             = useState('');
+    const [make, setMake]             = useState('');
+    const [model, setModel]           = useState('');
+    const [engine, setEngine]         = useState('');
+    const [mileage, setMileage]       = useState('');
+    const [nickname, setNickname]     = useState('');
 
     async function lookupVIN() {
       if (vin.length < 17) { Alert.alert('', T('add_vehicle_vin_invalid')); return; }
@@ -432,10 +350,11 @@ export default function App() {
         const result = await decodeVIN(vin);
         if (result && result.isValid) {
           setVinResult(result);
-          setSelectedMake(result.make);
-          setSelectedModel(result.model);
-          setSelectedEngine(result.engine);
-          setSelectedYear(result.year);
+          setYear(result.year);
+          setMake(result.make);
+          setModel(result.model);
+          setEngine(result.engine);
+          setMode('manual');
         } else {
           Alert.alert('', T('add_vehicle_vin_invalid'));
         }
@@ -446,16 +365,10 @@ export default function App() {
     }
 
     function handleAdd() {
-      if (!selectedYear || !selectedMake || !selectedModel) {
-        Alert.alert('', T('required'));
-        return;
-      }
+      if (!year || !make || !model) { Alert.alert('', T('required')); return; }
       addVehicle({
         vin: vin || null,
-        year: selectedYear,
-        make: selectedMake,
-        model: selectedModel,
-        engine: selectedEngine,
+        year, make, model, engine,
         mileage: mileage ? parseInt(mileage.replace(/,/g, '')) : null,
         nickname: nickname || null,
         addedAt: new Date().toISOString(),
@@ -464,21 +377,29 @@ export default function App() {
 
     return (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
+        <ScrollView style={s.screen} contentContainerStyle={s.screenContent}>
 
           <TouchableOpacity style={s.backBtn} onPress={() => setActiveTab('garage')}>
             <Text style={s.backBtnText}>← {T('btn_back')}</Text>
           </TouchableOpacity>
           <Text style={s.screenTitle}>{T('add_vehicle_title')}</Text>
 
-          {/* VIN entry (optional) */}
-          <View style={s.card}>
-            <Text style={s.sectionLabel}>
-              {lang === 'EN' ? 'VIN (optional — auto-fills details)' : 'VIN (opcional — rellena datos automáticamente)'}
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
+          <View style={s.modeToggle}>
+            <TouchableOpacity style={[s.modeBtn, mode === 'vin' && s.modeBtnActive]} onPress={() => setMode('vin')}>
+              <Text style={[s.modeBtnText, mode === 'vin' && s.modeBtnTextActive]}>VIN</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.modeBtn, mode === 'manual' && s.modeBtnActive]} onPress={() => setMode('manual')}>
+              <Text style={[s.modeBtnText, mode === 'manual' && s.modeBtnTextActive]}>
+                {lang === 'EN' ? 'Manual' : 'Manual'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {mode === 'vin' && (
+            <View style={s.card}>
+              <Text style={s.fieldLabel}>{T('add_vehicle_vin_label')}</Text>
               <TextInput
-                style={[s.input, { flex: 1 }]}
+                style={s.input}
                 value={vin}
                 onChangeText={t => setVin(t.toUpperCase())}
                 placeholder={T('add_vehicle_vin_placeholder')}
@@ -487,92 +408,60 @@ export default function App() {
                 maxLength={17}
               />
               <TouchableOpacity
-                style={[s.vinBtn, vinLoading && { opacity: 0.6 }]}
+                style={[s.primaryBtn, vinLoading && { opacity: 0.6 }]}
                 onPress={lookupVIN}
                 disabled={vinLoading}
               >
                 {vinLoading
-                  ? <ActivityIndicator color={COLORS.white} size="small" />
-                  : <Text style={s.vinBtnText}>{lang === 'EN' ? 'Decode' : 'Decodificar'}</Text>
+                  ? <ActivityIndicator color={COLORS.white} />
+                  : <Text style={s.primaryBtnText}>{lang === 'EN' ? 'Decode VIN' : 'Decodificar VIN'}</Text>
                 }
               </TouchableOpacity>
+              <TouchableOpacity onPress={() => setMode('manual')} style={{ marginTop: 12, alignItems: 'center' }}>
+                <Text style={{ color: COLORS.accent, fontSize: 13 }}>{T('add_vehicle_or')}</Text>
+              </TouchableOpacity>
             </View>
-            {vinResult && (
-              <View style={s.vinVerifiedBadge}>
-                <Text style={s.vinVerifiedText}>✓ {T('add_vehicle_vin_verified')}</Text>
+          )}
+
+          {mode === 'manual' && (
+            <View style={s.card}>
+              {vinResult && (
+                <View style={s.vinVerifiedBadge}>
+                  <Text style={s.vinVerifiedText}>✓ {T('add_vehicle_vin_verified')}</Text>
+                </View>
+              )}
+              <View style={s.fieldRow}>
+                <View style={s.fieldHalf}>
+                  <Text style={s.fieldLabel}>{T('add_vehicle_year')}</Text>
+                  <TextInput style={s.input} value={year} onChangeText={setYear} placeholder="2018" placeholderTextColor={COLORS.textMuted} keyboardType="number-pad" maxLength={4} />
+                </View>
+                <View style={s.fieldHalf}>
+                  <Text style={s.fieldLabel}>{T('add_vehicle_make')}</Text>
+                  <TextInput style={s.input} value={make} onChangeText={setMake} placeholder="Ford" placeholderTextColor={COLORS.textMuted} autoCapitalize="words" />
+                </View>
               </View>
-            )}
-          </View>
+              <View style={s.fieldRow}>
+                <View style={s.fieldHalf}>
+                  <Text style={s.fieldLabel}>{T('add_vehicle_model')}</Text>
+                  <TextInput style={s.input} value={model} onChangeText={setModel} placeholder="F-250" placeholderTextColor={COLORS.textMuted} autoCapitalize="words" />
+                </View>
+                <View style={s.fieldHalf}>
+                  <Text style={s.fieldLabel}>{T('add_vehicle_engine')}</Text>
+                  <TextInput style={s.input} value={engine} onChangeText={setEngine} placeholder="6.7L" placeholderTextColor={COLORS.textMuted} />
+                </View>
+              </View>
+              <Text style={s.fieldLabel}>{T('add_vehicle_odometer_label')}</Text>
+              <TextInput style={s.input} value={mileage} onChangeText={setMileage} placeholder="94,210" placeholderTextColor={COLORS.textMuted} keyboardType="number-pad" />
+              <Text style={s.fieldLabel}>{T('add_vehicle_nickname_label')}</Text>
+              <TextInput style={s.input} value={nickname} onChangeText={setNickname} placeholder={T('add_vehicle_nickname_placeholder')} placeholderTextColor={COLORS.textMuted} />
+            </View>
+          )}
 
-          {/* Scroll pickers */}
-          <View style={s.card}>
-            <Text style={s.sectionLabel}>
-              {lang === 'EN' ? 'Vehicle details' : 'Detalles del vehículo'}
-            </Text>
-
-            <Text style={s.fieldLabel}>{T('add_vehicle_make')}</Text>
-            <ScrollPicker
-              items={allMakes}
-              selectedValue={selectedMake}
-              onSelect={onMakeSelect}
-              label={T('add_vehicle_make')}
-              placeholder={lang === 'EN' ? 'Select make...' : 'Seleccionar marca...'}
-              lang={lang}
-            />
-
-            <Text style={s.fieldLabel}>{T('add_vehicle_model')}</Text>
-            <ScrollPicker
-              items={allModels}
-              selectedValue={selectedModel}
-              onSelect={onModelSelect}
-              label={T('add_vehicle_model')}
-              placeholder={selectedMake ? (lang === 'EN' ? 'Select model...' : 'Seleccionar modelo...') : (lang === 'EN' ? 'Select make first' : 'Primero selecciona la marca')}
-              lang={lang}
-            />
-
-            <Text style={s.fieldLabel}>{T('add_vehicle_engine')}</Text>
-            <ScrollPicker
-              items={allEngines}
-              selectedValue={selectedEngine}
-              onSelect={setSelectedEngine}
-              label={T('add_vehicle_engine')}
-              placeholder={selectedModel ? (lang === 'EN' ? 'Select engine...' : 'Seleccionar motor...') : (lang === 'EN' ? 'Select model first' : 'Primero selecciona el modelo')}
-              lang={lang}
-            />
-
-            <Text style={s.fieldLabel}>{lang === 'EN' ? 'Year' : 'Año'}</Text>
-            <ScrollPicker
-              items={allYears}
-              selectedValue={selectedYear}
-              onSelect={setSelectedYear}
-              label={lang === 'EN' ? 'Year' : 'Año'}
-              placeholder={selectedModel ? (lang === 'EN' ? 'Select year...' : 'Seleccionar año...') : (lang === 'EN' ? 'Select model first' : 'Primero selecciona el modelo')}
-              lang={lang}
-            />
-
-            <Text style={s.fieldLabel}>{T('add_vehicle_odometer_label')}</Text>
-            <TextInput
-              style={s.input}
-              value={mileage}
-              onChangeText={setMileage}
-              placeholder="94,210"
-              placeholderTextColor={COLORS.textMuted}
-              keyboardType="number-pad"
-            />
-
-            <Text style={s.fieldLabel}>{T('add_vehicle_nickname_label')}</Text>
-            <TextInput
-              style={s.input}
-              value={nickname}
-              onChangeText={setNickname}
-              placeholder={T('add_vehicle_nickname_placeholder')}
-              placeholderTextColor={COLORS.textMuted}
-            />
-          </View>
-
-          <TouchableOpacity style={s.primaryBtn} onPress={handleAdd}>
-            <Text style={s.primaryBtnText}>{T('add_vehicle_cta')}</Text>
-          </TouchableOpacity>
+          {mode === 'manual' && (
+            <TouchableOpacity style={s.primaryBtn} onPress={handleAdd}>
+              <Text style={s.primaryBtnText}>{T('add_vehicle_cta')}</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={s.requestVehicleBtn}
@@ -594,7 +483,7 @@ export default function App() {
   }
 
   // ─────────────────────────────────────────────
-  // PLACEHOLDER
+  // PLACEHOLDER SCREEN
   // ─────────────────────────────────────────────
   function PlaceholderScreen({ label }) {
     return (
@@ -612,6 +501,7 @@ export default function App() {
   return (
     <SafeAreaView style={s.safeArea}>
       <StatusBar style="light" backgroundColor={COLORS.primary} />
+
       <View style={s.header}>
         <View>
           <Text style={s.headerTitle}>{T('appName')}</Text>
@@ -621,14 +511,16 @@ export default function App() {
           <Text style={s.langBtnText}>{lang === 'EN' ? 'EN | ES' : 'ES | EN'}</Text>
         </TouchableOpacity>
       </View>
+
       <View style={s.screenWrap}>{renderScreen()}</View>
+
       <View style={s.bottomNav}>
         {[
-          { key: 'garage',   label: T('nav_garage'),  icon: '🏠' },
-          { key: 'schedule', label: T('nav_schedule'), icon: '📅' },
-          { key: 'shop',     label: T('nav_shop'),     icon: '🛒' },
-          { key: 'history',  label: T('nav_history'),  icon: '📋' },
-          { key: 'fuel',     label: T('nav_fuel'),     icon: '⛽' },
+          { key: 'garage',   label: T('nav_garage'),   icon: '🏠' },
+          { key: 'schedule', label: T('nav_schedule'),  icon: '📅' },
+          { key: 'shop',     label: T('nav_shop'),      icon: '🛒' },
+          { key: 'history',  label: T('nav_history'),   icon: '📋' },
+          { key: 'fuel',     label: T('nav_fuel'),      icon: '⛽' },
         ].map(tab => (
           <TouchableOpacity key={tab.key} style={s.navItem} onPress={() => setActiveTab(tab.key)}>
             <Text style={[s.navIcon, activeTab === tab.key && s.navIconActive]}>{tab.icon}</Text>
@@ -649,7 +541,7 @@ const s = StyleSheet.create({
   screen:        { flex: 1, backgroundColor: COLORS.bodyBg },
   screenContent: { padding: 14, paddingBottom: 40 },
 
-  header:      { backgroundColor: COLORS.primary, paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  header: { backgroundColor: COLORS.primary, paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   headerTitle: { color: COLORS.white, fontSize: 20, fontWeight: '600' },
   headerSub:   { color: 'rgba(255,255,255,0.55)', fontSize: 12, marginTop: 1 },
   langBtn:     { backgroundColor: 'rgba(255,255,255,0.15)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
@@ -696,38 +588,46 @@ const s = StyleSheet.create({
   badgeOk:       { backgroundColor: COLORS.okBg, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
   badgeOkText:   { fontSize: 11, color: COLORS.okText, fontWeight: '500' },
 
-  vehicleChipRow:        { flexDirection: 'row', marginBottom: 14 },
-  vehicleChip:           { backgroundColor: COLORS.cardBg, borderRadius: 20, borderWidth: 0.5, borderColor: COLORS.border, paddingHorizontal: 14, paddingVertical: 7, marginRight: 8 },
-  vehicleChipActive:     { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  vehicleChipText:       { fontSize: 12, color: COLORS.textMuted },
+  // Schedule screen
+  vehicleChipRow:      { flexDirection: 'row', marginBottom: 14 },
+  vehicleChip:         { backgroundColor: COLORS.cardBg, borderRadius: 20, borderWidth: 0.5, borderColor: COLORS.border, paddingHorizontal: 14, paddingVertical: 7, marginRight: 8 },
+  vehicleChipActive:   { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  vehicleChipText:     { fontSize: 12, color: COLORS.textMuted },
   vehicleChipTextActive: { color: COLORS.white, fontWeight: '600' },
 
-  scheduleHeader:      { backgroundColor: COLORS.cardBg, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.border, padding: 14, marginBottom: 14 },
-  scheduleVehicleName: { fontSize: 17, fontWeight: '700', color: COLORS.textNavy },
-  scheduleVehicleSub:  { fontSize: 13, color: COLORS.textMuted, marginTop: 2 },
-  oilSpec:             { fontSize: 12, color: COLORS.accent, marginTop: 6, fontWeight: '500' },
+  scheduleHeader:     { backgroundColor: COLORS.cardBg, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.border, padding: 14, marginBottom: 14 },
+  scheduleVehicleName:{ fontSize: 17, fontWeight: '700', color: COLORS.textNavy },
+  scheduleVehicleSub: { fontSize: 13, color: COLORS.textMuted, marginTop: 2 },
+  oilSpec:            { fontSize: 12, color: COLORS.accent, marginTop: 6, fontWeight: '500' },
 
   serviceSection:      { marginBottom: 14 },
   serviceSectionTitle: { fontSize: 13, fontWeight: '700', color: COLORS.textNavy, marginBottom: 8 },
+
   card:        { backgroundColor: COLORS.cardBg, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.border, padding: 14, marginBottom: 14 },
+  cardNote:    { fontSize: 13, color: COLORS.textMuted, lineHeight: 19 },
 
   serviceRow:  { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: COLORS.border },
   serviceName: { fontSize: 13, fontWeight: '500', color: COLORS.textPrimary, flex: 1, marginRight: 8 },
   serviceDue:  { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
   serviceSpec: { fontSize: 11, color: COLORS.accent, marginTop: 2 },
 
+  // Add vehicle screen
   backBtn:      { marginBottom: 16 },
   backBtnText:  { color: COLORS.accent, fontSize: 14, fontWeight: '500' },
   screenTitle:  { fontSize: 22, fontWeight: '700', color: COLORS.textNavy, marginBottom: 18 },
-  sectionLabel: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 10 },
-  fieldLabel:   { fontSize: 12, fontWeight: '500', color: COLORS.textMuted, marginBottom: 5, marginTop: 12 },
-  input:        { backgroundColor: COLORS.bodyBg, borderRadius: 8, borderWidth: 0.5, borderColor: COLORS.border, paddingHorizontal: 12, paddingVertical: 12, fontSize: 15, color: COLORS.textPrimary },
+  modeToggle:   { flexDirection: 'row', backgroundColor: COLORS.cardBg, borderRadius: 10, borderWidth: 0.5, borderColor: COLORS.border, overflow: 'hidden', marginBottom: 16 },
+  modeBtn:      { flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: COLORS.bodyBg },
+  modeBtnActive:{ backgroundColor: COLORS.primary },
+  modeBtnText:  { fontSize: 13, color: COLORS.textMuted, fontWeight: '500' },
+  modeBtnTextActive: { color: COLORS.white },
 
-  vinBtn:        { backgroundColor: COLORS.primary, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 12, justifyContent: 'center' },
-  vinBtnText:    { color: COLORS.white, fontSize: 13, fontWeight: '600' },
-  vinVerifiedBadge: { backgroundColor: COLORS.okBg, borderRadius: 8, padding: 8, marginTop: 8, alignItems: 'center' },
-  vinVerifiedText:  { color: COLORS.okText, fontSize: 13, fontWeight: '600' },
+  fieldRow:   { flexDirection: 'row', gap: 10 },
+  fieldHalf:  { flex: 1 },
+  fieldLabel: { fontSize: 12, fontWeight: '500', color: COLORS.textMuted, marginBottom: 5, marginTop: 12 },
+  input: { backgroundColor: COLORS.bodyBg, borderRadius: 8, borderWidth: 0.5, borderColor: COLORS.border, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: COLORS.textPrimary },
 
-  requestVehicleBtn:     { marginTop: 20, alignItems: 'center', paddingVertical: 14 },
+  vinVerifiedBadge:  { backgroundColor: COLORS.okBg, borderRadius: 8, padding: 8, marginBottom: 4, alignItems: 'center' },
+  vinVerifiedText:   { color: COLORS.okText, fontSize: 13, fontWeight: '600' },
+  requestVehicleBtn: { marginTop: 20, alignItems: 'center', paddingVertical: 14 },
   requestVehicleBtnText: { color: COLORS.accent, fontSize: 13, fontWeight: '500' },
 });

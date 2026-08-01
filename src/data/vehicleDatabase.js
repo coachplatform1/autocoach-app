@@ -629,33 +629,90 @@ export const MAINTENANCE_DB = {
 // PART 4: LOOKUP + CALCULATION FUNCTIONS
 // ─────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────
+// FUZZY MATCH HELPER
+// Strips hyphens, spaces, punctuation, lowercases for comparison
+// Allows "f250", "F250", "f-250" all to match "F-250"
+// ─────────────────────────────────────────────────────────────
+function fuzzy(str) {
+  return str.toLowerCase().replace(/[-\s\.]/g, '');
+}
+
 export function getMaintenanceSchedule(make, model, engine) {
-  const makeN  = make.trim().toLowerCase();
-  const modelN = model.trim().toLowerCase();
+  const makeN  = fuzzy(make.trim());
+  const modelN = fuzzy(model.trim());
+
+  // Find matching vehicle — fuzzy on both make and model
   const key = Object.keys(MAINTENANCE_DB).find(k => {
     const v = MAINTENANCE_DB[k];
-    return v.make.toLowerCase() === makeN && v.model.toLowerCase() === modelN;
+    return fuzzy(v.make) === makeN && fuzzy(v.model) === modelN;
   });
+
   if (!key) return null;
   const vehicle = MAINTENANCE_DB[key];
+
+  // Find matching engine — fuzzy, falls back to first engine if no match
   let engineData, engineName;
-  if (engine) {
-    const engineN = engine.trim().toLowerCase();
+  if (engine && engine.trim()) {
+    const engineN = fuzzy(engine.trim());
     engineName = Object.keys(vehicle.engines).find(e =>
-      e.toLowerCase().includes(engineN) || engineN.includes(e.toLowerCase().split(' ')[0])
+      fuzzy(e).includes(engineN) ||
+      engineN.includes(fuzzy(e).substring(0, 4)) ||
+      fuzzy(e).startsWith(engineN.substring(0, 4))
     );
-    engineData = vehicle.engines[engineName] || Object.values(vehicle.engines)[0];
-    if (!vehicle.engines[engineName]) engineName = Object.keys(vehicle.engines)[0];
+    engineData = engineName ? vehicle.engines[engineName] : Object.values(vehicle.engines)[0];
+    if (!engineName) engineName = Object.keys(vehicle.engines)[0];
   } else {
     engineName = Object.keys(vehicle.engines)[0];
     engineData = Object.values(vehicle.engines)[0];
   }
+
   return {
     make: vehicle.make, model: vehicle.model, years: vehicle.years,
     engineName, oilSpec: engineData.oilSpec, oilQty: engineData.oilQty,
     filterPN: engineData.filterPN, notes: engineData.notes || null,
     services: engineData.services,
   };
+}
+
+// ─────────────────────────────────────────────────────────────
+// PICKER DATA HELPERS
+// Returns arrays for ScrollView/Picker selectors
+// ─────────────────────────────────────────────────────────────
+
+/** Returns sorted list of all unique makes in the database */
+export function getAllMakes() {
+  const makes = [...new Set(Object.values(MAINTENANCE_DB).map(v => v.make))];
+  return makes.sort();
+}
+
+/** Returns all models for a given make */
+export function getModelsForMake(make) {
+  const makeN = fuzzy(make);
+  const models = Object.values(MAINTENANCE_DB)
+    .filter(v => fuzzy(v.make) === makeN)
+    .map(v => v.model);
+  return [...new Set(models)].sort();
+}
+
+/** Returns all engines for a given make + model */
+export function getEnginesForMakeModel(make, model) {
+  const makeN  = fuzzy(make);
+  const modelN = fuzzy(model);
+  const vehicle = Object.values(MAINTENANCE_DB).find(v =>
+    fuzzy(v.make) === makeN && fuzzy(v.model) === modelN
+  );
+  return vehicle ? Object.keys(vehicle.engines) : [];
+}
+
+/** Returns year range for a given make + model */
+export function getYearsForMakeModel(make, model) {
+  const makeN  = fuzzy(make);
+  const modelN = fuzzy(model);
+  const vehicle = Object.values(MAINTENANCE_DB).find(v =>
+    fuzzy(v.make) === makeN && fuzzy(v.model) === modelN
+  );
+  return vehicle ? vehicle.years : [];
 }
 
 export function calculateDueServices(services, currentMileage, serviceHistory = {}) {

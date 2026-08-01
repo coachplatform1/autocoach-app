@@ -531,6 +531,50 @@ export const TRANSLATIONS = {
     EN: "services due",
     ES: "servicios pendientes",
   },
+  // ─────────────────────────────────────────────
+  // SERVICE STATUS BADGES
+  // ─────────────────────────────────────────────
+  svc_status_overdue: {
+    EN: "Overdue",
+    ES: "Vencido",
+  },
+  svc_status_due_soon: {
+    EN: "Due Soon",
+    ES: "Próximamente",
+  },
+  svc_status_ok: {
+    EN: "OK",
+    ES: "OK",
+  },
+  svc_due_in: {
+    EN: "Due in",
+    ES: "Vence en",
+  },
+  svc_overdue_suffix: {
+    EN: "mi overdue",
+    ES: "mi vencido",
+  },
+  svc_time_based: {
+    EN: "Time-based service",
+    ES: "Servicio por tiempo",
+  },
+  svc_log_done: {
+    EN: "Mark as done",
+    ES: "Marcar como hecho",
+  },
+  svc_logged_at: {
+    EN: "Last done at",
+    ES: "Último servicio a",
+  },
+  required: {
+    EN: "Year, make, and model are required.",
+    ES: "El año, la marca y el modelo son obligatorios.",
+  },
+  error_network: {
+    EN: "Network error. Please check your connection and try again.",
+    ES: "Error de red. Verifica tu conexión e intenta de nuevo.",
+  },
+
   garage_all_current: {
     EN: "All current",
     ES: "Todo al día",
