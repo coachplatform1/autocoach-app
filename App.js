@@ -307,8 +307,8 @@ export default function App() {
       const name   = lang === 'ES' ? svc.nameES : svc.nameEN;
       const milesText = svc.milesUntilDue !== null
         ? isOd
-          ? `${Math.abs(svc.milesUntilDue).toLocaleString()} mi ${T('svc_overdue_suffix')}`
-          : `${T('svc_due_in')} ${svc.milesUntilDue.toLocaleString()} mi`
+          ? `${Math.abs(Math.round(svc.milesUntilDue)).toLocaleString()} ${T('svc_overdue_suffix')}`
+          : `${T('svc_due_in')} ${Math.round(svc.milesUntilDue).toLocaleString()} mi`
         : T('svc_time_based');
 
       return (
@@ -349,9 +349,11 @@ export default function App() {
             {activeVehicle.engine}{currentMileage ? ' · ' + currentMileage.toLocaleString() + ' mi' : ''}
           </Text>
           {schedule?.oilSpec && (
-            <Text style={s.oilSpec}>
-              {lang === 'EN' ? 'Oil:' : 'Aceite:'} {schedule.oilSpec} · {schedule.oilQty}
-            </Text>
+            <View style={{ marginTop: 8 }}>
+              <Text style={s.oilSpec}>🛢 {lang === 'EN' ? 'Oil:' : 'Aceite:'} {schedule.oilSpec}</Text>
+              <Text style={s.oilSpec}>📦 {lang === 'EN' ? 'Capacity:' : 'Capacidad:'} {schedule.oilQty}</Text>
+              <Text style={s.oilSpec}>🔩 {lang === 'EN' ? 'Filter:' : 'Filtro:'} {schedule.filterPN}</Text>
+            </View>
           )}
           {!schedule && (
             <Text style={{ fontSize: 12, color: COLORS.accentDark, marginTop: 6 }}>
