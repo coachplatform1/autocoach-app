@@ -507,7 +507,6 @@ export default function App() {
         pricePerGal:  price,
         totalCost:    total,
         date:         new Date().toISOString(),
-        dateDisplay:  new Date().toLocaleString(),
       };
 
       const updated = [entry, ...fuelLog];
@@ -657,7 +656,7 @@ export default function App() {
                         {entry.mileage.toLocaleString()} mi — {entry.gallons} {lang === 'EN' ? 'gal' : 'gal'}
                       </Text>
                       <Text style={s.serviceDue}>
-                        {entry.dateDisplay || date}
+                        {date}
                         {entryMPG ? ` · ${entryMPG} MPG` : ''}
                         {entry.totalCost > 0 ? ` · $${entry.totalCost.toFixed(2)}` : ''}
                       </Text>
