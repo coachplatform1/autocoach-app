@@ -715,7 +715,7 @@ export function getYearsForMakeModel(make, model) {
   return vehicle ? vehicle.years : [];
 }
 
-export function calculateDueServices(services, currentMileage, serviceHistory = {}) {
+export function calculateDueServices(services, currentMileage, serviceHistory = {}, dueSoonThreshold = 1500) {
   return services.map(service => {
     const history = serviceHistory[service.id];
     const lastMileage = history?.lastMileage || 0;
@@ -725,7 +725,7 @@ export function calculateDueServices(services, currentMileage, serviceHistory = 
     let status = 'ok';
     if (milesUntilDue !== null) {
       if (milesUntilDue <= 0) status = 'overdue';
-      else if (milesUntilDue <= 1500) status = 'due_soon';
+      else if (milesUntilDue <= dueSoonThreshold) status = 'due_soon';
     }
     return { ...service, lastMileage, milesUntilDue, status };
   }).sort((a, b) => ({ overdue:0, due_soon:1, ok:2 }[a.status] - { overdue:0, due_soon:1, ok:2 }[b.status]));
