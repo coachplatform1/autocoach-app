@@ -78,6 +78,13 @@ const SERVICE_SHOP_MAP = {
 };
 const DEFAULT_SHOP_ENTRY = { icon: '🔧', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AMAZON'] };
 
+// Google Play / App Store reviewers can't complete a real purchase or use a
+// "free trial" to access subscription-gated content — this code lets a
+// reviewer unlock full Pro access without paying, per each store's app
+// review requirements. Disclosed directly in the store listing's
+// restricted-content declaration, not a security secret.
+const REVIEWER_UNLOCK_CODE = 'AUTOCOACH-REVIEW-2026';
+
 // ─────────────────────────────────────────────
 // SCROLL PICKER COMPONENT
 // ─────────────────────────────────────────────
@@ -275,6 +282,8 @@ export default function App() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [showSupportChat, setShowSupportChat] = useState(false);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const reviewCodeInputRef = useRef('');
 
   const T = (key) => TRANSLATIONS[key]?.[lang] ?? key;
 
@@ -489,6 +498,38 @@ export default function App() {
         },
       ]
     );
+  }
+
+  // ── STORE-REVIEWER BYPASS ─────────────────────
+  // Triggered by long-pressing the version number in Settings (hidden —
+  // not a visible button). Lets an App Store / Google Play reviewer unlock
+  // full Pro access without a real purchase, since reviewers can't use a
+  // free trial or complete a paid transaction during review. The exact
+  // trigger + code are disclosed directly in each store's restricted-content
+  // declaration, so this isn't meant to be a security secret — just hidden
+  // from ordinary users who'd have no reason to stumble onto it.
+  function handleReviewCodeSubmit() {
+    if (reviewCodeInputRef.current.trim().toUpperCase() === REVIEWER_UNLOCK_CODE) {
+      setIsPro(true);
+      setVehicleLimit(999);
+      setCurrentTier('reviewer_unlock');
+      AsyncStorage.setItem('autocoach_is_pro', 'true').catch(() => {});
+      AsyncStorage.setItem('autocoach_vehicle_limit', '999').catch(() => {});
+      AsyncStorage.setItem('autocoach_subscribed_tier', 'reviewer_unlock').catch(() => {});
+      setShowReviewModal(false);
+      reviewCodeInputRef.current = '';
+      Alert.alert(
+        '',
+        lang === 'EN'
+          ? 'Reviewer access unlocked — full Pro features enabled on this device.'
+          : 'Acceso de revisor desbloqueado — funciones Pro completas habilitadas en este dispositivo.'
+      );
+    } else {
+      Alert.alert(
+        '',
+        lang === 'EN' ? 'Invalid code.' : 'Código inválido.'
+      );
+    }
   }
 
   function openAffiliateLink(affiliateKey) {
@@ -1579,9 +1620,11 @@ export default function App() {
       autocoach_fleet_s: T('calc_name_fleet_s'), autocoach_fleet_m: T('calc_name_fleet_m'),
       autocoach_fleet_l: T('calc_name_fleet_l'),
     };
-    const planLabel = isPro && currentTier
-      ? (tierLabels[currentTier] ?? currentTier)
-      : (lang === 'EN' ? 'Not subscribed' : 'No suscrito');
+    const planLabel = isPro && currentTier === 'reviewer_unlock'
+      ? (lang === 'EN' ? 'Reviewer Access (test)' : 'Acceso de Revisor (prueba)')
+      : isPro && currentTier
+        ? (tierLabels[currentTier] ?? currentTier)
+        : (lang === 'EN' ? 'Not subscribed' : 'No suscrito');
 
     function SettingsRow({ label, value, onPress, showArrow = true }) {
       return (
@@ -1596,6 +1639,7 @@ export default function App() {
     }
 
     return (
+      <>
       <ScrollView style={s.screen} contentContainerStyle={s.screenContent}>
         <TouchableOpacity style={s.backBtn} onPress={() => setActiveTab('garage')}>
           <Text style={s.backBtnText}>← {T('btn_back')}</Text>
@@ -1700,8 +1744,60 @@ export default function App() {
           <SettingsRow label={T('settings_sign_out')} onPress={handleResetApp} showArrow={false} />
         </View>
 
-        <Text style={s.settingsVersion}>{T('settings_version')} 1.0.0 (dev)</Text>
+        <Text style={s.settingsVersion} onLongPress={() => setShowReviewModal(true)} delayLongPress={800}>
+          {T('settings_version')} 1.0.0 (dev)
+        </Text>
       </ScrollView>
+
+      {/* Hidden store-reviewer bypass — see handleReviewCodeSubmit comment above */}
+      <Modal
+        visible={showReviewModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { setShowReviewModal(false); reviewCodeInputRef.current = ''; }}
+      >
+        <KeyboardAvoidingView
+          style={s.reviewModalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={s.reviewModalCard}>
+            <Text style={s.reviewModalTitle}>
+              {lang === 'EN' ? 'Reviewer Access' : 'Acceso de Revisor'}
+            </Text>
+            <Text style={s.reviewModalBody}>
+              {lang === 'EN'
+                ? 'Enter the reviewer unlock code to enable full Pro access for testing.'
+                : 'Ingresa el código de desbloqueo para habilitar el acceso Pro completo para pruebas.'}
+            </Text>
+            <TextInput
+              style={s.reviewModalInput}
+              defaultValue=""
+              onChangeText={(t) => { reviewCodeInputRef.current = t; }}
+              placeholder={lang === 'EN' ? 'Enter code' : 'Ingresa el código'}
+              placeholderTextColor={COLORS.textMuted}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              autoFocus
+            />
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+              <TouchableOpacity
+                style={[s.reviewModalBtn, s.reviewModalBtnCancel]}
+                onPress={() => { setShowReviewModal(false); reviewCodeInputRef.current = ''; }}
+              >
+                <Text style={s.reviewModalBtnCancelText}>{lang === 'EN' ? 'Cancel' : 'Cancelar'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.reviewModalBtn, s.reviewModalBtnSubmit]}
+                onPress={handleReviewCodeSubmit}
+              >
+                <Text style={s.reviewModalBtnSubmitText}>{lang === 'EN' ? 'Unlock' : 'Desbloquear'}</Text>
+              </TouchableOpacity>
+            </View>
+
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+      </>
     );
   }
 
@@ -1959,6 +2055,18 @@ const s = StyleSheet.create({
   segmentBtnActive:  { backgroundColor: COLORS.primary },
   segmentText:       { fontSize: 12, color: COLORS.textMuted },
   segmentTextActive: { color: COLORS.white, fontWeight: '600' },
+
+  // Reviewer-unlock modal
+  reviewModalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  reviewModalCard:     { backgroundColor: COLORS.cardBg, borderRadius: 14, padding: 20, width: '100%', maxWidth: 340 },
+  reviewModalTitle:    { fontSize: 17, fontWeight: '700', color: COLORS.textNavy, marginBottom: 8 },
+  reviewModalBody:     { fontSize: 13, color: COLORS.textMuted, lineHeight: 19, marginBottom: 16 },
+  reviewModalInput:    { backgroundColor: COLORS.bodyBg, borderRadius: 8, borderWidth: 0.5, borderColor: COLORS.border, paddingHorizontal: 12, paddingVertical: 12, fontSize: 15, color: COLORS.textPrimary },
+  reviewModalBtn:         { flex: 1, borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
+  reviewModalBtnCancel:   { borderWidth: 0.5, borderColor: COLORS.border },
+  reviewModalBtnCancelText: { color: COLORS.textMuted, fontSize: 14, fontWeight: '500' },
+  reviewModalBtnSubmit:     { backgroundColor: COLORS.accent },
+  reviewModalBtnSubmitText: { color: COLORS.white, fontSize: 14, fontWeight: '600' },
 });
 
 const cs = StyleSheet.create({
