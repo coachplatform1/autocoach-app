@@ -4,11 +4,13 @@ import {
   StyleSheet, Text, View, TouchableOpacity,
   SafeAreaView, Platform, ScrollView,
   TextInput, ActivityIndicator, Alert,
-  KeyboardAvoidingView, Modal, FlatList, Share,
+  KeyboardAvoidingView, Modal, FlatList, Share, Linking, Switch,
 } from 'react-native';
+import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TRANSLATIONS } from './src/translations/TRANSLATIONS';
 import { COLORS } from './src/constants/colors';
+import SupportChat from './src/components/SupportChat';
 import {
   decodeVIN,
   getMaintenanceSchedule,
@@ -18,8 +20,63 @@ import {
   getEnginesForMakeModel,
   getYearsForMakeModel,
 } from './src/data/vehicleDatabase';
+import { AFFILIATE } from './src/constants/affiliates';
+import { VEHICLE_LIMITS } from './src/constants/products';
+import FleetPricingCalculator from './src/components/FleetPricingCalculator';
 
 // expo-camera integrated during production build
+
+// ─────────────────────────────────────────────
+// SHOP DATA — maps vehicleDatabase service ids to affiliate partners
+// (real partner list from src/constants/affiliates.js)
+// ─────────────────────────────────────────────
+const AFFILIATE_LABELS = {
+  ADVANCE_AUTO:   'Advance Auto Parts',
+  AUTOZONE:       'AutoZone',
+  AMAZON:         'Amazon',
+  TIRE_RACK:      'Tire Rack',
+  SIMPLE_TIRE:    'SimpleTire',
+  MAVIS:          'Mavis Tires',
+  VALVOLINE:      'Valvoline',
+  SAFELITE:       'Safelite',
+  EDMUNDS:        'Edmunds',
+  AAA:            'AAA',
+  CHEMICAL_GUYS:  'Chemical Guys',
+  FINDITPARTS:    'FindItParts',
+  AUTONATION:     'AutoNation Parts',
+  BATTERY_TENDER: 'Battery Tender',
+  EASTWOOD:       'Eastwood',
+  UPSIDE:         'Upside',
+  ATOB:           'AtoB',
+  REPAIRPAL:      'RepairPal',
+};
+
+// Maps each vehicleDatabase service `id` to the best-fit affiliate partner(s).
+// Falls back to DEFAULT_SHOP_ENTRY for any service id not listed here
+// (keeps this future-proof as new services get added to the DB).
+const SERVICE_SHOP_MAP = {
+  oil_filter:         { icon: '🛢️', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AMAZON'] },
+  tire_rotation:      { icon: '🛞', primary: 'TIRE_RACK',     alternates: ['SIMPLE_TIRE', 'MAVIS'] },
+  air_filter_cabin:   { icon: '🌬️', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AMAZON'] },
+  air_filter_engine:  { icon: '🌬️', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AMAZON'] },
+  brake_inspection:   { icon: '🛑', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AUTONATION'] },
+  spark_plugs:        { icon: '🔥', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AMAZON'] },
+  transmission:       { icon: '⚙️', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
+  coolant:            { icon: '❄️', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE'] },
+  brake_fluid:        { icon: '🧯', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE'] },
+  battery:            { icon: '🔋', primary: 'BATTERY_TENDER', alternates: ['ADVANCE_AUTO', 'AUTOZONE'] },
+  serpentine_belt:    { icon: '➰', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE'] },
+  wiper_blades:       { icon: '🌧️', primary: 'SAFELITE',    alternates: ['ADVANCE_AUTO', 'AMAZON'] },
+  fuel_filter_diesel: { icon: '⛽', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
+  def_fluid:          { icon: '💧', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AMAZON'] },
+  glow_plugs:         { icon: '🔥', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
+  egr_cleaning:       { icon: '🧰', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
+  dpf_cleaning:       { icon: '🧰', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
+  turbo_inspection:   { icon: '🧰', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
+  hybrid_battery:     { icon: '🔋', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
+  hybrid_brake:       { icon: '🛑', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE'] },
+};
+const DEFAULT_SHOP_ENTRY = { icon: '🔧', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AMAZON'] };
 
 // ─────────────────────────────────────────────
 // SCROLL PICKER COMPONENT
@@ -84,6 +141,118 @@ const sp = StyleSheet.create({
 });
 
 // ─────────────────────────────────────────────
+// ONBOARDING + DISCLAIMER GATE
+// Standalone component (outside App) — receives `lang` as an explicit
+// prop per project convention. Runs once on first launch:
+//   1) 5-screen welcome carousel (Skip / Next)
+//   2) Legal disclaimer the user must agree to before using the app
+// ─────────────────────────────────────────────
+const ONBOARDING_STEPS = [
+  { icon: '🚗', titleKey: 'onboarding_welcome_title', bodyKey: 'onboarding_welcome_subtitle' },
+  { icon: '📋', titleKey: 'onboarding_step1_title',   bodyKey: 'onboarding_step1_body' },
+  { icon: '📸', titleKey: 'onboarding_step2_title',   bodyKey: 'onboarding_step2_body' },
+  { icon: '⏰', titleKey: 'onboarding_step3_title',   bodyKey: 'onboarding_step3_body' },
+  { icon: '📈', titleKey: 'onboarding_step4_title',   bodyKey: 'onboarding_step4_body' },
+];
+
+function OnboardingFlow({ lang, toggleLang, onboardingDone, onFinishOnboarding, onAgreeDisclaimer }) {
+  const T = (key) => TRANSLATIONS[key]?.[lang] ?? key;
+  const [phase, setPhase] = useState(onboardingDone ? 'disclaimer' : 'carousel');
+  const [step, setStep]   = useState(0);
+
+  const isLastStep = step === ONBOARDING_STEPS.length - 1;
+  const current = ONBOARDING_STEPS[step];
+
+  function handleNext() {
+    if (isLastStep) {
+      onFinishOnboarding();
+      setPhase('disclaimer');
+    } else {
+      setStep(step + 1);
+    }
+  }
+
+  function handleSkip() {
+    onFinishOnboarding();
+    setPhase('disclaimer');
+  }
+
+  return (
+    <SafeAreaView style={ob.safeArea}>
+      <StatusBar style="light" backgroundColor={COLORS.primary} />
+
+      <View style={ob.topRow}>
+        <TouchableOpacity style={ob.langBtn} onPress={toggleLang}>
+          <Text style={ob.langBtnText}>{lang === 'EN' ? 'EN | ES' : 'ES | EN'}</Text>
+        </TouchableOpacity>
+        {phase === 'carousel' && !isLastStep && (
+          <TouchableOpacity onPress={handleSkip}>
+            <Text style={ob.skipText}>{T('onboarding_skip')}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {phase === 'carousel' ? (
+        <View style={ob.carouselBody}>
+          <Text style={ob.icon}>{current.icon}</Text>
+          <Text style={ob.title}>{T(current.titleKey)}</Text>
+          <Text style={ob.body}>{T(current.bodyKey)}</Text>
+
+          <View style={ob.dotsRow}>
+            {ONBOARDING_STEPS.map((_, i) => (
+              <View key={i} style={[ob.dot, i === step && ob.dotActive]} />
+            ))}
+          </View>
+
+          <TouchableOpacity style={ob.primaryBtn} onPress={handleNext}>
+            <Text style={ob.primaryBtnText}>
+              {isLastStep ? T('onboarding_get_started') : T('onboarding_next')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <ScrollView style={ob.disclaimerBody} contentContainerStyle={ob.disclaimerContent}>
+          <Text style={ob.disclaimerIcon}>⚠️</Text>
+          <Text style={ob.title}>{T('onboarding_disclaimer_title')}</Text>
+          <Text style={ob.disclaimerText}>{T('onboarding_disclaimer_body')}</Text>
+
+          <TouchableOpacity style={ob.primaryBtn} onPress={onAgreeDisclaimer}>
+            <Text style={ob.primaryBtnText}>{T('onboarding_disclaimer_agree')}</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      )}
+    </SafeAreaView>
+  );
+}
+
+const ob = StyleSheet.create({
+  safeArea:    { flex: 1, backgroundColor: COLORS.primary },
+  topRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 8 },
+  langBtn:     { backgroundColor: 'rgba(255,255,255,0.15)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
+  langBtnText: { color: COLORS.white, fontSize: 11, fontWeight: '600' },
+  skipText:    { color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '500' },
+
+  carouselBody: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+  icon:         { fontSize: 64, marginBottom: 24 },
+  title:        { fontSize: 22, fontWeight: '700', color: COLORS.white, textAlign: 'center', marginBottom: 14 },
+  body:         { fontSize: 15, color: 'rgba(255,255,255,0.75)', textAlign: 'center', lineHeight: 22, marginBottom: 36 },
+
+  dotsRow:   { flexDirection: 'row', gap: 8, marginBottom: 36 },
+  dot:       { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.3)' },
+  dotActive: { backgroundColor: COLORS.accent, width: 22 },
+
+  primaryBtn:     { backgroundColor: COLORS.accent, borderRadius: 10, paddingVertical: 15, paddingHorizontal: 48, alignItems: 'center', alignSelf: 'stretch' },
+  primaryBtnText: { color: COLORS.white, fontSize: 16, fontWeight: '600' },
+
+  disclaimerBody:    { flex: 1 },
+  disclaimerContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 40 },
+  disclaimerIcon:    { fontSize: 48, marginBottom: 20 },
+  disclaimerText:    { fontSize: 14, color: 'rgba(255,255,255,0.8)', textAlign: 'center', lineHeight: 21, marginBottom: 36 },
+});
+
+
+
+// ─────────────────────────────────────────────
 // MAIN APP
 // ─────────────────────────────────────────────
 export default function App() {
@@ -97,6 +266,15 @@ export default function App() {
   const [isPro, setIsPro]                     = useState(false);
   const [vehicleLimit, setVehicleLimit]       = useState(0);
   const [cameraPermission, setCameraPermission] = useState(null);
+  const [checkingGate, setCheckingGate]       = useState(true);
+  const [onboardingDone, setOnboardingDone]   = useState(false);
+  const [disclaimerAgreed, setDisclaimerAgreed] = useState(false);
+  const [currentTier, setCurrentTier]         = useState(null);
+  const [units, setUnits]                     = useState('miles');
+  const [mileageInterval, setMileageInterval] = useState(1000);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [locationEnabled, setLocationEnabled] = useState(false);
+  const [showSupportChat, setShowSupportChat] = useState(false);
 
   const T = (key) => TRANSLATIONS[key]?.[lang] ?? key;
 
@@ -105,7 +283,71 @@ export default function App() {
     AsyncStorage.getItem('autocoach_vehicles').then(s => { if (s) setVehicles(JSON.parse(s)); });
     AsyncStorage.getItem('autocoach_service_history').then(s => { if (s) setServiceHistory(JSON.parse(s)); });
     AsyncStorage.getItem('autocoach_fuel_log').then(s => { if (s) setFuelLog(JSON.parse(s)); });
+    // Dev-simulated subscription state (see handleSubscribe below — Ankit
+    // replaces this with real RevenueCat customerInfo before launch).
+    AsyncStorage.getItem('autocoach_is_pro').then(s => { if (s === 'true') setIsPro(true); });
+    AsyncStorage.getItem('autocoach_vehicle_limit').then(s => { if (s) setVehicleLimit(parseInt(s, 10) || 0); });
+    AsyncStorage.getItem('autocoach_subscribed_tier').then(s => { if (s) setCurrentTier(s); });
+    // Settings preferences
+    AsyncStorage.getItem('autocoach_units').then(s => { if (s) setUnits(s); });
+    AsyncStorage.getItem('autocoach_mileage_interval').then(s => { if (s) setMileageInterval(parseInt(s, 10) || 1000); });
+    AsyncStorage.getItem('autocoach_notifications_enabled').then(s => { if (s !== null) setNotificationsEnabled(s === 'true'); });
+    AsyncStorage.getItem('autocoach_location_enabled').then(s => { if (s === 'true') setLocationEnabled(true); });
   }, []);
+
+  // First-launch gate: onboarding carousel + legal disclaimer must both
+  // be completed once before the main tabs are shown (mirrors PoolCoach).
+  // Hardened: wrapped in try/catch/finally + a hard timeout so a storage
+  // read failure (or a hang) can NEVER leave the app stuck on the spinner —
+  // worst case it just falls through and shows onboarding.
+  useEffect(() => {
+    let settled = false;
+
+    function finish(obFlag, daFlag) {
+      if (settled) return;
+      settled = true;
+      setOnboardingDone(obFlag === 'true');
+      setDisclaimerAgreed(daFlag === 'true');
+      setCheckingGate(false);
+    }
+
+    const safetyTimer = setTimeout(() => {
+      console.warn('Onboarding gate check timed out — defaulting to first-launch flow.');
+      finish(null, null);
+    }, 4000);
+
+    (async () => {
+      try {
+        const [obFlag, daFlag] = await Promise.all([
+          AsyncStorage.getItem('autocoach_onboarding_complete'),
+          AsyncStorage.getItem('autocoach_disclaimer_agreed'),
+        ]);
+        clearTimeout(safetyTimer);
+        finish(obFlag, daFlag);
+      } catch (err) {
+        console.error('Onboarding gate check failed:', err);
+        clearTimeout(safetyTimer);
+        // Fail safe: treat as first launch rather than hanging forever.
+        finish(null, null);
+      }
+    })();
+
+    return () => clearTimeout(safetyTimer);
+  }, []);
+
+  function completeOnboarding() {
+    setOnboardingDone(true);
+    AsyncStorage.setItem('autocoach_onboarding_complete', 'true').catch(err =>
+      console.error('Could not save onboarding flag:', err)
+    );
+  }
+
+  function agreeToDisclaimer() {
+    setDisclaimerAgreed(true);
+    AsyncStorage.setItem('autocoach_disclaimer_agreed', 'true').catch(err =>
+      console.error('Could not save disclaimer flag:', err)
+    );
+  }
 
   function saveVehicles(updated) {
     setVehicles(updated);
@@ -125,6 +367,138 @@ export default function App() {
     setActiveTab('garage');
   }
 
+  // Gated entry point for "+ Add Vehicle" — AutoCoach has no free tier,
+  // so anyone without an active subscription (or who's hit their tier's
+  // vehicle limit) gets routed to the paywall instead of the add-vehicle form.
+  function handleAddVehiclePress() {
+    if (vehicles.length >= vehicleLimit) {
+      setActiveTab('paywall');
+    } else {
+      setActiveTab('addVehicle');
+    }
+  }
+
+  // 'autocoach_solo_monthly' / 'autocoach_solo_annual' -> 'autocoach_solo'
+  function tierKeyFromProductId(rcId) {
+    return rcId.replace(/_monthly$|_annual$/, '');
+  }
+
+  // ── DEV STUB — Ankit replaces this with a real RevenueCat purchase call
+  // (Purchases.purchasePackage / restorePurchases + customerInfo listener)
+  // before the production build. This simulates a successful purchase so
+  // the vehicle-limit gating can be tested end-to-end right now.
+  function handleSubscribe(rcId, price) {
+    const tierKey = tierKeyFromProductId(rcId);
+    const limit = VEHICLE_LIMITS[tierKey] ?? 0;
+
+    setIsPro(true);
+    setVehicleLimit(limit);
+    setCurrentTier(tierKey);
+    AsyncStorage.setItem('autocoach_is_pro', 'true').catch(() => {});
+    AsyncStorage.setItem('autocoach_vehicle_limit', String(limit)).catch(() => {});
+    AsyncStorage.setItem('autocoach_subscribed_tier', tierKey).catch(() => {});
+
+    Alert.alert(
+      lang === 'EN' ? 'Subscribed (dev preview)' : 'Suscrito (vista previa)',
+      lang === 'EN'
+        ? `This is a simulated purchase for testing — no real charge. Vehicle limit: ${limit}. Ankit wires the real RevenueCat purchase before launch.`
+        : `Esta es una compra simulada para pruebas — sin cargo real. Límite de vehículos: ${limit}. Ankit conectará la compra real de RevenueCat antes del lanzamiento.`,
+      [{ text: lang === 'EN' ? 'OK' : 'Aceptar', onPress: () => setActiveTab('garage') }]
+    );
+  }
+
+  function handleEnterpriseContact() {
+    // FleetPricingCalculator already opens a mailto: to fleet@coachplatform.app
+    // with the vehicle count pre-filled — nothing else needed here for now.
+  }
+
+  function handleRestorePurchases() {
+    Alert.alert(
+      lang === 'EN' ? 'Restore purchases' : 'Restaurar compras',
+      lang === 'EN'
+        ? 'Restore will be wired to RevenueCat in the production build. There are no real purchases to restore in this dev preview.'
+        : 'La restauración se conectará a RevenueCat en la compilación de producción. No hay compras reales que restaurar en esta vista previa.'
+    );
+  }
+
+  // ── SETTINGS HANDLERS ─────────────────────────
+  function setUnitsAndSave(next) {
+    setUnits(next);
+    AsyncStorage.setItem('autocoach_units', next).catch(() => {});
+  }
+
+  function setMileageIntervalAndSave(next) {
+    setMileageInterval(next);
+    AsyncStorage.setItem('autocoach_mileage_interval', String(next)).catch(() => {});
+  }
+
+  function toggleNotifications(next) {
+    setNotificationsEnabled(next);
+    AsyncStorage.setItem('autocoach_notifications_enabled', String(next)).catch(() => {});
+  }
+
+  async function requestLocationAccess() {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      const granted = status === 'granted';
+      setLocationEnabled(granted);
+      AsyncStorage.setItem('autocoach_location_enabled', String(granted)).catch(() => {});
+      if (!granted) {
+        Alert.alert(
+          '',
+          lang === 'EN'
+            ? 'Location access was denied. You can enable it later from your phone settings.'
+            : 'Se denegó el acceso a la ubicación. Puedes habilitarlo más tarde desde la configuración de tu teléfono.'
+        );
+      }
+    } catch (err) {
+      console.error('Location permission error:', err);
+    }
+  }
+
+  function handleResetApp() {
+    Alert.alert(
+      lang === 'EN' ? 'Reset AutoCoach?' : '¿Restablecer AutoCoach?',
+      lang === 'EN'
+        ? 'This clears every vehicle, service record, fuel log, and subscription status stored on this device. This cannot be undone.'
+        : 'Esto borra todos los vehículos, registros de servicio, historial de combustible y estado de suscripción almacenados en este dispositivo. Esto no se puede deshacer.',
+      [
+        { text: lang === 'EN' ? 'Cancel' : 'Cancelar', style: 'cancel' },
+        {
+          text: lang === 'EN' ? 'Reset' : 'Restablecer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await AsyncStorage.multiRemove([
+                'autocoach_lang', 'autocoach_vehicles', 'autocoach_service_history',
+                'autocoach_fuel_log', 'autocoach_is_pro', 'autocoach_vehicle_limit',
+                'autocoach_subscribed_tier', 'autocoach_onboarding_complete',
+                'autocoach_disclaimer_agreed', 'autocoach_units', 'autocoach_mileage_interval',
+                'autocoach_notifications_enabled', 'autocoach_location_enabled',
+              ]);
+            } catch (err) {
+              console.error('Reset failed:', err);
+            }
+            setVehicles([]); setActiveVehicle(null); setServiceHistory({}); setFuelLog([]);
+            setIsPro(false); setVehicleLimit(0); setCurrentTier(null);
+            setUnits('miles'); setMileageInterval(1000);
+            setNotificationsEnabled(true); setLocationEnabled(false);
+            setOnboardingDone(false); setDisclaimerAgreed(false);
+            setActiveTab('garage');
+          },
+        },
+      ]
+    );
+  }
+
+  function openAffiliateLink(affiliateKey) {
+    const url = AFFILIATE[affiliateKey];
+    if (!url) return;
+    Linking.openURL(url).catch(() => {
+      Alert.alert('', lang === 'EN' ? 'Could not open link.' : 'No se pudo abrir el enlace.');
+    });
+  }
+
   // ─────────────────────────────────────────────
   // SCREEN ROUTER
   // ─────────────────────────────────────────────
@@ -132,7 +506,9 @@ export default function App() {
     switch (activeTab) {
       case 'garage':        return <GarageScreen />;
       case 'schedule':      return <ScheduleScreen />;
-      case 'shop':          return <PlaceholderScreen label={T('nav_shop')} />;
+      case 'shop':          return <ShopScreen />;
+      case 'paywall':       return <PaywallScreen />;
+      case 'settings':      return <SettingsScreen />;
       case 'history':       return <HistoryScreen />;
       case 'fuel':          return <FuelScreen />;
       case 'addVehicle':    return <AddVehicleScreen />;
@@ -150,7 +526,7 @@ export default function App() {
       const schedule = getMaintenanceSchedule(v.make, v.model, v.engine);
       if (schedule && v.mileage) {
         const vKey = `${v.year}_${v.make}_${v.model}`;
-        const due = calculateDueServices(schedule.services, Number(v.mileage), serviceHistory[vKey] || {});
+        const due = calculateDueServices(schedule.services, Number(v.mileage), serviceHistory[vKey] || {}, mileageInterval);
         totalDue += due.filter(s => s.status === 'overdue' || s.status === 'due_soon').length;
       }
     });
@@ -177,7 +553,7 @@ export default function App() {
             <Text style={s.emptyIcon}>🚗</Text>
             <Text style={s.emptyTitle}>{T('garage_no_vehicles_title')}</Text>
             <Text style={s.emptyBody}>{T('garage_no_vehicles_body')}</Text>
-            <TouchableOpacity style={s.addVehicleBtn} onPress={() => setActiveTab('addVehicle')}>
+            <TouchableOpacity style={s.addVehicleBtn} onPress={handleAddVehiclePress}>
               <Text style={s.addVehicleBtnText}>+ {T('garage_add_vehicle')}</Text>
             </TouchableOpacity>
           </View>
@@ -187,7 +563,7 @@ export default function App() {
             const vKey = `${vehicle.year}_${vehicle.make}_${vehicle.model}`;
             let overdueCount = 0, soonCount = 0;
             if (schedule && vehicle.mileage) {
-              const due = calculateDueServices(schedule.services, Number(vehicle.mileage), serviceHistory[vKey] || {});
+              const due = calculateDueServices(schedule.services, Number(vehicle.mileage), serviceHistory[vKey] || {}, mileageInterval);
               overdueCount = due.filter(s => s.status === 'overdue').length;
               soonCount = due.filter(s => s.status === 'due_soon').length;
             }
@@ -218,7 +594,7 @@ export default function App() {
         )}
 
         {vehicles.length > 0 && (
-          <TouchableOpacity style={s.addVehicleBtnSecondary} onPress={() => setActiveTab('addVehicle')}>
+          <TouchableOpacity style={s.addVehicleBtnSecondary} onPress={handleAddVehiclePress}>
             <Text style={s.addVehicleBtnSecondaryText}>+ {T('garage_add_vehicle')}</Text>
           </TouchableOpacity>
         )}
@@ -235,7 +611,7 @@ export default function App() {
         <View style={s.emptyWrap}>
           <Text style={s.emptyIcon}>📅</Text>
           <Text style={s.emptyTitle}>{T('garage_no_vehicles_title')}</Text>
-          <TouchableOpacity style={s.addVehicleBtn} onPress={() => setActiveTab('addVehicle')}>
+          <TouchableOpacity style={s.addVehicleBtn} onPress={handleAddVehiclePress}>
             <Text style={s.addVehicleBtnText}>+ {T('garage_add_vehicle')}</Text>
           </TouchableOpacity>
         </View>
@@ -248,7 +624,7 @@ export default function App() {
 
     let services = [];
     if (schedule) {
-      services = calculateDueServices(schedule.services, currentMileage, serviceHistory[vKey] || {});
+      services = calculateDueServices(schedule.services, currentMileage, serviceHistory[vKey] || {}, mileageInterval);
     }
 
     const overdue = services.filter(s => s.status === 'overdue');
@@ -884,6 +1260,217 @@ export default function App() {
   }
 
   // ─────────────────────────────────────────────
+  // SHOP SCREEN
+  // ─────────────────────────────────────────────
+  function ShopScreen() {
+    const [shopVehicle, setShopVehicle] = useState(activeVehicle);
+
+    const schedule = shopVehicle
+      ? getMaintenanceSchedule(shopVehicle.make, shopVehicle.model, shopVehicle.engine)
+      : null;
+    const vKey = shopVehicle ? `${shopVehicle.year}_${shopVehicle.make}_${shopVehicle.model}` : null;
+
+    let dueNow = [], comingUp = [];
+    if (schedule && shopVehicle?.mileage) {
+      const due = calculateDueServices(schedule.services, Number(shopVehicle.mileage), serviceHistory[vKey] || {}, mileageInterval);
+      dueNow   = due.filter(sv => sv.status === 'overdue');
+      comingUp = due.filter(sv => sv.status === 'due_soon');
+    }
+
+    const vehicleLabel = shopVehicle ? `${shopVehicle.year} ${shopVehicle.make} ${shopVehicle.model}` : '';
+    const tireIsDue = [...dueNow, ...comingUp].some(sv => sv.id === 'tire_rotation');
+
+    function isOemPart(svc) {
+      return /oem/i.test(svc.spec || '') || /oem/i.test(svc.notes || '');
+    }
+
+    function PartCard({ svc }) {
+      const map  = SERVICE_SHOP_MAP[svc.id] || DEFAULT_SHOP_ENTRY;
+      const name = lang === 'ES' ? svc.nameES : svc.nameEN;
+
+      return (
+        <View style={s.shopCard}>
+          <View style={s.shopCardHeader}>
+            <Text style={s.shopCardIcon}>{map.icon}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.shopCardTitle}>{name}</Text>
+              <Text style={s.shopCardBody}>{T('shop_exact_fit')} {vehicleLabel}</Text>
+              {isOemPart(svc) && (
+                <View style={s.oemBadge}><Text style={s.oemBadgeText}>{T('shop_oem_part')}</Text></View>
+              )}
+            </View>
+          </View>
+          <TouchableOpacity style={s.shopBuyBtn} onPress={() => openAffiliateLink(map.primary)}>
+            <Text style={s.shopBuyBtnText}>{T('shop_buy')} — {AFFILIATE_LABELS[map.primary]}</Text>
+          </TouchableOpacity>
+          {map.alternates?.length > 0 && (
+            <View style={s.shopAltRow}>
+              {map.alternates.map((key, i) => (
+                <TouchableOpacity key={i} onPress={() => openAffiliateLink(key)}>
+                  <Text style={s.shopAltLink}>{T('shop_view')} — {AFFILIATE_LABELS[key]}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+      );
+    }
+
+    return (
+      <ScrollView style={s.screen} contentContainerStyle={s.screenContent}>
+        <Text style={s.screenTitle}>{T('shop_title')}</Text>
+        <Text style={s.shopSubtitle}>{T('shop_subtitle')}</Text>
+
+        {vehicles.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.vehicleChipRow}>
+            {vehicles.map((v, i) => (
+              <TouchableOpacity
+                key={i}
+                style={[s.vehicleChip, shopVehicle === v && s.vehicleChipActive]}
+                onPress={() => setShopVehicle(v)}
+              >
+                <Text style={[s.vehicleChipText, shopVehicle === v && s.vehicleChipTextActive]}>
+                  {v.year} {v.make} {v.model}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+
+        {dueNow.length > 0 && (
+          <View style={s.serviceSection}>
+            <Text style={s.serviceSectionTitle}>🔴 {T('shop_due_now')} ({dueNow.length})</Text>
+            {dueNow.map((svc, i) => <PartCard key={i} svc={svc} />)}
+          </View>
+        )}
+
+        {comingUp.length > 0 && (
+          <View style={s.serviceSection}>
+            <Text style={s.serviceSectionTitle}>🟡 {T('shop_coming_up')} ({comingUp.length})</Text>
+            {comingUp.map((svc, i) => <PartCard key={i} svc={svc} />)}
+          </View>
+        )}
+
+        {shopVehicle && dueNow.length === 0 && comingUp.length === 0 && (
+          <View style={[s.card, { alignItems: 'center', paddingVertical: 24 }]}>
+            <Text style={{ fontSize: 13, color: COLORS.textMuted, textAlign: 'center', lineHeight: 19 }}>
+              {T('shop_empty')}
+            </Text>
+          </View>
+        )}
+
+        {/* Tires — always shown */}
+        <View style={s.serviceSection}>
+          <View style={s.shopCard}>
+            <View style={s.shopCardHeader}>
+              <Text style={s.shopCardIcon}>🛞</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={s.shopCardTitle}>{T('shop_tires')}</Text>
+                <Text style={s.shopCardBody}>
+                  {T('shop_exact_fit')} {vehicleLabel || (lang === 'EN' ? 'your vehicle' : 'tu vehículo')}
+                </Text>
+              </View>
+              {tireIsDue && (
+                <View style={s.shopDueBadge}><Text style={s.shopDueBadgeText}>{T('shop_due_now')}</Text></View>
+              )}
+            </View>
+            <TouchableOpacity style={s.shopBuyBtn} onPress={() => openAffiliateLink('TIRE_RACK')}>
+              <Text style={s.shopBuyBtnText}>{T('shop_buy')} — {AFFILIATE_LABELS.TIRE_RACK}</Text>
+            </TouchableOpacity>
+            <View style={s.shopAltRow}>
+              <TouchableOpacity onPress={() => openAffiliateLink('SIMPLE_TIRE')}>
+                <Text style={s.shopAltLink}>{T('shop_view')} — {AFFILIATE_LABELS.SIMPLE_TIRE}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => openAffiliateLink('MAVIS')}>
+                <Text style={s.shopAltLink}>{T('shop_view')} — {AFFILIATE_LABELS.MAVIS}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
+        {/* Detailing — always shown */}
+        <View style={s.serviceSection}>
+          <View style={s.shopCard}>
+            <View style={s.shopCardHeader}>
+              <Text style={s.shopCardIcon}>🧽</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={s.shopCardTitle}>{T('shop_detailing')}</Text>
+              </View>
+            </View>
+            <TouchableOpacity style={s.shopBuyBtn} onPress={() => openAffiliateLink('CHEMICAL_GUYS')}>
+              <Text style={s.shopBuyBtnText}>{T('shop_buy')} — {AFFILIATE_LABELS.CHEMICAL_GUYS}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* All parts catch-all */}
+        <TouchableOpacity style={s.shopAllPartsRow} onPress={() => openAffiliateLink('ADVANCE_AUTO')}>
+          <Text style={s.shopAllPartsText}>🔎 {T('shop_all_parts')}</Text>
+          <Text style={s.shopAllPartsArrow}>›</Text>
+        </TouchableOpacity>
+
+        {/* Local car wash deals */}
+        <TouchableOpacity style={s.carWashBanner} onPress={() => openAffiliateLink('UPSIDE')}>
+          <Text style={s.carWashTitle}>🚿 {T('shop_car_wash_title')}</Text>
+          <Text style={s.carWashSubtitle}>{T('shop_car_wash_subtitle')}</Text>
+          <Text style={s.carWashCta}>{T('shop_car_wash_cta')} →</Text>
+        </TouchableOpacity>
+
+        <View style={s.shopDisclaimerBox}>
+          <Text style={s.shopDisclaimerText}>{T('shop_affiliate_disclosure')}</Text>
+        </View>
+      </ScrollView>
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // PAYWALL SCREEN
+  // No free tier — this is the only path to unlocking vehicle-adding.
+  // FleetPricingCalculator.js owns the tier picker, pricing math, and the
+  // subscribe/enterprise CTAs; this screen wraps it with the value-prop
+  // header, feature list, and legal footer.
+  // ─────────────────────────────────────────────
+  function PaywallScreen() {
+    return (
+      <ScrollView style={s.screen} contentContainerStyle={s.screenContent}>
+        <TouchableOpacity style={s.backBtn} onPress={() => setActiveTab('garage')}>
+          <Text style={s.backBtnText}>← {T('btn_back')}</Text>
+        </TouchableOpacity>
+
+        <Text style={s.screenTitle}>{T('paywall_title')}</Text>
+        <Text style={s.paywallSubtitle}>{T('paywall_subtitle')}</Text>
+
+        <View style={s.card}>
+          {[1, 2, 3, 4, 5, 6, 7].map(n => (
+            <View key={n} style={s.paywallFeatureRow}>
+              <Text style={s.paywallFeatureCheck}>✓</Text>
+              <Text style={s.paywallFeatureText}>{T(`paywall_feature_${n}`)}</Text>
+            </View>
+          ))}
+        </View>
+
+        <FleetPricingCalculator
+          lang={lang}
+          onSubscribe={handleSubscribe}
+          onContact={handleEnterpriseContact}
+        />
+
+        <View style={s.paywallFooterRow}>
+          <TouchableOpacity onPress={handleRestorePurchases}>
+            <Text style={s.paywallFooterLink}>{T('paywall_restore')}</Text>
+          </TouchableOpacity>
+          <Text style={s.paywallFooterDot}>·</Text>
+          <TouchableOpacity onPress={() => Linking.openURL('https://coachplatform.app/privacy.html')}>
+            <Text style={s.paywallFooterLink}>{T('paywall_terms')}</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={s.paywallNoFreeTier}>{T('paywall_no_free_tier')}</Text>
+      </ScrollView>
+    );
+  }
+
+  // ─────────────────────────────────────────────
   // ADD VEHICLE SCREEN
   // ─────────────────────────────────────────────
   function AddVehicleScreen() {
@@ -983,6 +1570,142 @@ export default function App() {
   }
 
   // ─────────────────────────────────────────────
+  // SETTINGS SCREEN
+  // ─────────────────────────────────────────────
+  function SettingsScreen() {
+    const tierLabels = {
+      autocoach_solo: T('calc_name_solo'), autocoach_duo: T('calc_name_duo'),
+      autocoach_family: T('calc_name_family'), autocoach_family_plus: T('calc_name_family_plus'),
+      autocoach_fleet_s: T('calc_name_fleet_s'), autocoach_fleet_m: T('calc_name_fleet_m'),
+      autocoach_fleet_l: T('calc_name_fleet_l'),
+    };
+    const planLabel = isPro && currentTier
+      ? (tierLabels[currentTier] ?? currentTier)
+      : (lang === 'EN' ? 'Not subscribed' : 'No suscrito');
+
+    function SettingsRow({ label, value, onPress, showArrow = true }) {
+      return (
+        <TouchableOpacity style={s.settingsRow} onPress={onPress} disabled={!onPress}>
+          <Text style={s.settingsRowLabel}>{label}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            {value != null && <Text style={s.settingsRowValue}>{value}</Text>}
+            {showArrow && onPress && <Text style={s.settingsRowArrow}>›</Text>}
+          </View>
+        </TouchableOpacity>
+      );
+    }
+
+    return (
+      <ScrollView style={s.screen} contentContainerStyle={s.screenContent}>
+        <TouchableOpacity style={s.backBtn} onPress={() => setActiveTab('garage')}>
+          <Text style={s.backBtnText}>← {T('btn_back')}</Text>
+        </TouchableOpacity>
+        <Text style={s.screenTitle}>{T('settings_title')}</Text>
+
+        {/* Account / Subscription */}
+        <Text style={s.settingsSectionTitle}>{T('settings_account')}</Text>
+        <View style={s.card}>
+          <SettingsRow
+            label={T('settings_subscription')}
+            value={planLabel}
+            onPress={() => setActiveTab('paywall')}
+          />
+          <SettingsRow
+            label={T('settings_restore')}
+            onPress={handleRestorePurchases}
+          />
+        </View>
+
+        {/* Preferences */}
+        <Text style={s.settingsSectionTitle}>{T('settings_notifications')} & {T('settings_units')}</Text>
+        <View style={s.card}>
+          <SettingsRow
+            label={T('settings_language')}
+            value={lang === 'EN' ? 'English' : 'Español'}
+            onPress={toggleLang}
+          />
+
+          <View style={s.settingsDivider} />
+
+          <Text style={s.settingsSubLabel}>{T('settings_units')}</Text>
+          <View style={s.segmentRow}>
+            <TouchableOpacity
+              style={[s.segmentBtn, units === 'miles' && s.segmentBtnActive]}
+              onPress={() => setUnitsAndSave('miles')}
+            >
+              <Text style={[s.segmentText, units === 'miles' && s.segmentTextActive]}>{T('settings_units_miles')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.segmentBtn, units === 'km' && s.segmentBtnActive]}
+              onPress={() => setUnitsAndSave('km')}
+            >
+              <Text style={[s.segmentText, units === 'km' && s.segmentTextActive]}>{T('settings_units_km')}</Text>
+            </TouchableOpacity>
+          </View>
+          {units === 'km' && (
+            <Text style={s.settingsNote}>
+              {lang === 'EN'
+                ? 'Display unit saved — full km conversion across the app is coming in a future update.'
+                : 'Unidad guardada — la conversión completa a km en toda la app llegará en una futura actualización.'}
+            </Text>
+          )}
+
+          <View style={s.settingsDivider} />
+
+          <Text style={s.settingsSubLabel}>{T('settings_mileage_interval')}</Text>
+          <View style={s.segmentRow}>
+            {[[500, 'settings_mileage_500'], [1000, 'settings_mileage_1000'], [2000, 'settings_mileage_2000']].map(([val, key]) => (
+              <TouchableOpacity
+                key={val}
+                style={[s.segmentBtn, mileageInterval === val && s.segmentBtnActive]}
+                onPress={() => setMileageIntervalAndSave(val)}
+              >
+                <Text style={[s.segmentText, mileageInterval === val && s.segmentTextActive]}>{T(key)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View style={s.settingsDivider} />
+
+          <View style={s.settingsSwitchRow}>
+            <Text style={s.settingsRowLabel}>{T('settings_notifications')}</Text>
+            <Switch
+              value={notificationsEnabled}
+              onValueChange={toggleNotifications}
+              trackColor={{ false: COLORS.border, true: COLORS.accent }}
+              thumbColor={COLORS.white}
+            />
+          </View>
+
+          <View style={s.settingsDivider} />
+
+          <SettingsRow
+            label={T('settings_location')}
+            value={locationEnabled ? T('settings_location_enabled') : T('settings_location_disabled')}
+            onPress={requestLocationAccess}
+            showArrow={false}
+          />
+        </View>
+
+        {/* Support & Legal */}
+        <Text style={s.settingsSectionTitle}>{lang === 'EN' ? 'Support & Legal' : 'Soporte y Legal'}</Text>
+        <View style={s.card}>
+          <SettingsRow label={T('settings_support')} onPress={() => setShowSupportChat(true)} />
+          <SettingsRow label={T('settings_privacy')} onPress={() => Linking.openURL('https://coachplatform.app/privacy.html')} />
+          <SettingsRow label={T('settings_terms')} onPress={() => Linking.openURL('https://coachplatform.app/terms.html')} />
+        </View>
+
+        {/* Danger zone */}
+        <View style={[s.card, { borderColor: COLORS.overdueText }]}>
+          <SettingsRow label={T('settings_sign_out')} onPress={handleResetApp} showArrow={false} />
+        </View>
+
+        <Text style={s.settingsVersion}>{T('settings_version')} 1.0.0 (dev)</Text>
+      </ScrollView>
+    );
+  }
+
+  // ─────────────────────────────────────────────
   // PLACEHOLDER
   // ─────────────────────────────────────────────
   function PlaceholderScreen({ label }) {
@@ -998,6 +1721,37 @@ export default function App() {
   // ─────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────
+  if (checkingGate) {
+    return (
+      <SafeAreaView style={[s.safeArea, { alignItems: 'center', justifyContent: 'center' }]}>
+        <StatusBar style="light" backgroundColor={COLORS.primary} />
+        <ActivityIndicator color={COLORS.white} size="large" />
+      </SafeAreaView>
+    );
+  }
+
+  if (!onboardingDone || !disclaimerAgreed) {
+    return (
+      <OnboardingFlow
+        lang={lang}
+        toggleLang={toggleLang}
+        onboardingDone={onboardingDone}
+        onFinishOnboarding={completeOnboarding}
+        onAgreeDisclaimer={agreeToDisclaimer}
+      />
+    );
+  }
+
+  if (showSupportChat) {
+    return (
+      <SupportChat
+        lang={lang}
+        appName="autocoach"
+        onClose={() => setShowSupportChat(false)}
+      />
+    );
+  }
+
   return (
     <SafeAreaView style={s.safeArea}>
       <StatusBar style="light" backgroundColor={COLORS.primary} />
@@ -1006,9 +1760,14 @@ export default function App() {
           <Text style={s.headerTitle}>{T('appName')}</Text>
           <Text style={s.headerSub}>{vehicles.length} {T('garage_stat_vehicles')}</Text>
         </View>
-        <TouchableOpacity style={s.langBtn} onPress={toggleLang}>
-          <Text style={s.langBtnText}>{lang === 'EN' ? 'EN | ES' : 'ES | EN'}</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <TouchableOpacity style={s.langBtn} onPress={toggleLang}>
+            <Text style={s.langBtnText}>{lang === 'EN' ? 'EN | ES' : 'ES | EN'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.gearBtn} onPress={() => setActiveTab('settings')}>
+            <Text style={s.gearBtnText}>⚙️</Text>
+          </TouchableOpacity>
+        </View>
       </View>
       <View style={s.screenWrap}>{renderScreen()}</View>
       <View style={s.bottomNav}>
@@ -1043,6 +1802,8 @@ const s = StyleSheet.create({
   headerSub:   { color: 'rgba(255,255,255,0.55)', fontSize: 12, marginTop: 1 },
   langBtn:     { backgroundColor: 'rgba(255,255,255,0.15)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
   langBtnText: { color: COLORS.white, fontSize: 11, fontWeight: '600' },
+  gearBtn:     { backgroundColor: 'rgba(255,255,255,0.15)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  gearBtnText: { fontSize: 14 },
 
   bottomNav:      { flexDirection: 'row', backgroundColor: COLORS.white, borderTopWidth: 0.5, borderTopColor: COLORS.border, paddingBottom: Platform.OS === 'ios' ? 20 : 8, paddingTop: 8 },
   navItem:        { flex: 1, alignItems: 'center', gap: 3 },
@@ -1142,6 +1903,62 @@ const s = StyleSheet.create({
   edmundsBannerTitle: { color: COLORS.okText, fontSize: 15, fontWeight: '700', marginBottom: 4 },
   edmundsBannerBody:  { color: '#065F46', fontSize: 13, marginBottom: 8, lineHeight: 18 },
   edmundsBannerCta:   { color: COLORS.okText, fontSize: 13, fontWeight: '600' },
+
+  // Shop screen
+  shopSubtitle:    { fontSize: 13, color: COLORS.textMuted, marginTop: -12, marginBottom: 16 },
+  shopCard:        { backgroundColor: COLORS.cardBg, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.border, padding: 14, marginBottom: 12 },
+  shopCardHeader:  { flexDirection: 'row', marginBottom: 10, alignItems: 'flex-start' },
+  shopCardIcon:    { fontSize: 28, marginRight: 12 },
+  shopCardTitle:   { fontSize: 15, fontWeight: '600', color: COLORS.textNavy },
+  shopCardBody:    { fontSize: 12, color: COLORS.textMuted, marginTop: 2, lineHeight: 17 },
+  shopBuyBtn:      { backgroundColor: COLORS.accent, borderRadius: 8, paddingVertical: 11, alignItems: 'center' },
+  shopBuyBtnText:  { color: COLORS.white, fontSize: 13, fontWeight: '600' },
+  shopAltRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 10 },
+  shopAltLink:     { fontSize: 12, color: COLORS.accent, fontWeight: '500', textDecorationLine: 'underline' },
+  shopDisclaimerBox:  { marginTop: 6, marginBottom: 20, paddingHorizontal: 4 },
+  shopDisclaimerText: { fontSize: 10, color: COLORS.textMuted, lineHeight: 14, textAlign: 'center' },
+
+  oemBadge:        { alignSelf: 'flex-start', backgroundColor: COLORS.okBg, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2, marginTop: 6 },
+  oemBadgeText:    { fontSize: 10, color: COLORS.okText, fontWeight: '600' },
+  shopDueBadge:      { backgroundColor: COLORS.overdueBg, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3, marginLeft: 8 },
+  shopDueBadgeText:  { fontSize: 11, color: COLORS.overdueText, fontWeight: '500' },
+
+  shopAllPartsRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: COLORS.cardBg, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.border, paddingHorizontal: 16, paddingVertical: 15, marginBottom: 14 },
+  shopAllPartsText:  { fontSize: 14, fontWeight: '500', color: COLORS.textNavy },
+  shopAllPartsArrow: { fontSize: 20, color: COLORS.textMuted },
+
+  carWashBanner:      { backgroundColor: COLORS.primary, borderRadius: 12, padding: 16, marginBottom: 14 },
+  carWashTitle:       { color: COLORS.white, fontSize: 15, fontWeight: '700', marginBottom: 4 },
+  carWashSubtitle:    { color: 'rgba(255,255,255,0.7)', fontSize: 13, marginBottom: 8 },
+  carWashCta:         { color: COLORS.accent, fontSize: 13, fontWeight: '600' },
+
+  // Paywall screen
+  paywallSubtitle:      { fontSize: 13, color: COLORS.textMuted, marginTop: -12, marginBottom: 16, lineHeight: 19 },
+  paywallFeatureRow:    { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 6 },
+  paywallFeatureCheck:  { fontSize: 14, color: COLORS.okText, fontWeight: '700', marginRight: 10, marginTop: 1 },
+  paywallFeatureText:   { fontSize: 13, color: COLORS.textPrimary, flex: 1, lineHeight: 19 },
+  paywallFooterRow:     { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, marginTop: 4, marginBottom: 10 },
+  paywallFooterLink:    { fontSize: 12, color: COLORS.accent, fontWeight: '500' },
+  paywallFooterDot:     { fontSize: 12, color: COLORS.textMuted },
+  paywallNoFreeTier:    { fontSize: 11, color: COLORS.textMuted, textAlign: 'center', marginBottom: 20 },
+
+  // Settings screen
+  settingsSectionTitle: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 8, marginTop: 4 },
+  settingsRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 13 },
+  settingsRowLabel: { fontSize: 14, color: COLORS.textPrimary, fontWeight: '500' },
+  settingsRowValue: { fontSize: 13, color: COLORS.textMuted },
+  settingsRowArrow: { fontSize: 18, color: COLORS.textMuted },
+  settingsSwitchRow:{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
+  settingsDivider:  { height: 0.5, backgroundColor: COLORS.border, marginVertical: 6 },
+  settingsSubLabel: { fontSize: 12, color: COLORS.textMuted, marginBottom: 8, marginTop: 4 },
+  settingsNote:     { fontSize: 11, color: COLORS.textMuted, lineHeight: 15, marginTop: 8, fontStyle: 'italic' },
+  settingsVersion:  { fontSize: 11, color: COLORS.textMuted, textAlign: 'center', marginTop: 8, marginBottom: 24 },
+
+  segmentRow:        { flexDirection: 'row', borderRadius: 8, borderWidth: 0.5, borderColor: COLORS.border, overflow: 'hidden' },
+  segmentBtn:        { flex: 1, paddingVertical: 9, alignItems: 'center', backgroundColor: COLORS.bodyBg },
+  segmentBtnActive:  { backgroundColor: COLORS.primary },
+  segmentText:       { fontSize: 12, color: COLORS.textMuted },
+  segmentTextActive: { color: COLORS.white, fontWeight: '600' },
 });
 
 const cs = StyleSheet.create({
