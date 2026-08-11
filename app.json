@@ -1,5 +1,6 @@
 {
   "expo": {
+    "owner": "bkeating",
     "name": "AutoCoach",
     "slug": "AutoCoach",
     "version": "1.0.0",
@@ -13,7 +14,8 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.coachplatform.autocoach"
     },
     "android": {
       "package": "com.coachplatform.autocoach",

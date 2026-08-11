@@ -10,6 +10,9 @@ import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TRANSLATIONS } from './src/translations/TRANSLATIONS';
 import { COLORS } from './src/constants/colors';
+import { VEHICLE_LIMITS } from './src/constants/products';
+import { useRevenueCat } from './src/hooks/useRevenueCat';
+import { SOW_TRANSLATIONS } from './src/translations/SowTranslations';
 import SupportChat from './src/components/SupportChat';
 import {
   decodeVIN,
@@ -21,7 +24,7 @@ import {
   getYearsForMakeModel,
 } from './src/data/vehicleDatabase';
 import { AFFILIATE } from './src/constants/affiliates';
-import { VEHICLE_LIMITS } from './src/constants/products';
+
 import FleetPricingCalculator from './src/components/FleetPricingCalculator';
 
 // expo-camera integrated during production build
@@ -274,8 +277,10 @@ export default function App() {
   const [serviceHistory, setServiceHistory]   = useState({});
   const [selectedService, setSelectedService] = useState(null);
   const [fuelLog, setFuelLog]                 = useState([]);
-  const [isPro, setIsPro]                     = useState(false);
-  const [vehicleLimit, setVehicleLimit]       = useState(0);
+  
+  const T = (key) => TRANSLATIONS[key]?.[lang] ?? key;
+  const { isPro, vehicleLimit, purchaseProduct, restorePurchases } = useRevenueCat(T);
+  
   const [cameraPermission, setCameraPermission] = useState(null);
   const [checkingGate, setCheckingGate]       = useState(true);
   const [onboardingDone, setOnboardingDone]   = useState(false);
@@ -290,18 +295,12 @@ export default function App() {
   const reviewCodeInputRef = useRef('');
   const [documents, setDocuments]             = useState([]);
 
-  const T = (key) => TRANSLATIONS[key]?.[lang] ?? key;
-
   useEffect(() => {
     AsyncStorage.getItem('autocoach_lang').then(s => { if (s) setLang(s); });
     AsyncStorage.getItem('autocoach_vehicles').then(s => { if (s) setVehicles(JSON.parse(s)); });
     AsyncStorage.getItem('autocoach_service_history').then(s => { if (s) setServiceHistory(JSON.parse(s)); });
     AsyncStorage.getItem('autocoach_fuel_log').then(s => { if (s) setFuelLog(JSON.parse(s)); });
     AsyncStorage.getItem('autocoach_documents').then(s => { if (s) setDocuments(JSON.parse(s)); });
-    // Dev-simulated subscription state (see handleSubscribe below — Ankit
-    // replaces this with real RevenueCat customerInfo before launch).
-    AsyncStorage.getItem('autocoach_is_pro').then(s => { if (s === 'true') setIsPro(true); });
-    AsyncStorage.getItem('autocoach_vehicle_limit').then(s => { if (s) setVehicleLimit(parseInt(s, 10) || 0); });
     AsyncStorage.getItem('autocoach_subscribed_tier').then(s => { if (s) setCurrentTier(s); });
     // Settings preferences
     AsyncStorage.getItem('autocoach_units').then(s => { if (s) setUnits(s); });
@@ -433,28 +432,16 @@ export default function App() {
     return rcId.replace(/_monthly$|_annual$/, '');
   }
 
-  // ── DEV STUB — Ankit replaces this with a real RevenueCat purchase call
-  // (Purchases.purchasePackage / restorePurchases + customerInfo listener)
-  // before the production build. This simulates a successful purchase so
-  // the vehicle-limit gating can be tested end-to-end right now.
-  function handleSubscribe(rcId, price) {
-    const tierKey = tierKeyFromProductId(rcId);
-    const limit = VEHICLE_LIMITS[tierKey] ?? 0;
-
-    setIsPro(true);
-    setVehicleLimit(limit);
-    setCurrentTier(tierKey);
-    AsyncStorage.setItem('autocoach_is_pro', 'true').catch(() => {});
-    AsyncStorage.setItem('autocoach_vehicle_limit', String(limit)).catch(() => {});
-    AsyncStorage.setItem('autocoach_subscribed_tier', tierKey).catch(() => {});
-
-    Alert.alert(
-      lang === 'EN' ? 'Subscribed (dev preview)' : 'Suscrito (vista previa)',
-      lang === 'EN'
-        ? `This is a simulated purchase for testing — no real charge. Vehicle limit: ${limit}. Ankit wires the real RevenueCat purchase before launch.`
-        : `Esta es una compra simulada para pruebas — sin cargo real. Límite de vehículos: ${limit}. Ankit conectará la compra real de RevenueCat antes del lanzamiento.`,
-      [{ text: lang === 'EN' ? 'OK' : 'Aceptar', onPress: () => setActiveTab('garage') }]
-    );
+  // RevenueCat real purchase handling
+  async function handleSubscribe(rcId, price) {
+    const success = await purchaseProduct(rcId);
+    if (success) {
+      setActiveTab('garage');
+      Alert.alert(
+        SOW_TRANSLATIONS[lang]?.purchase_success_title || SOW_TRANSLATIONS.EN.purchase_success_title,
+        SOW_TRANSLATIONS[lang]?.purchase_success_msg || SOW_TRANSLATIONS.EN.purchase_success_msg
+      );
+    }
   }
 
   function handleEnterpriseContact() {
@@ -462,13 +449,14 @@ export default function App() {
     // with the vehicle count pre-filled — nothing else needed here for now.
   }
 
-  function handleRestorePurchases() {
-    Alert.alert(
-      lang === 'EN' ? 'Restore purchases' : 'Restaurar compras',
-      lang === 'EN'
-        ? 'Restore will be wired to RevenueCat in the production build. There are no real purchases to restore in this dev preview.'
-        : 'La restauración se conectará a RevenueCat en la compilación de producción. No hay compras reales que restaurar en esta vista previa.'
-    );
+  async function handleRestorePurchases() {
+    const success = await restorePurchases();
+    if (success) {
+      Alert.alert(
+        SOW_TRANSLATIONS[lang]?.restore_success_title || SOW_TRANSLATIONS.EN.restore_success_title,
+        SOW_TRANSLATIONS[lang]?.restore_success_msg || SOW_TRANSLATIONS.EN.restore_success_msg
+      );
+    }
   }
 
   // ── SETTINGS HANDLERS ─────────────────────────
@@ -530,7 +518,7 @@ export default function App() {
               console.error('Reset failed:', err);
             }
             setVehicles([]); setActiveVehicle(null); setServiceHistory({}); setFuelLog([]);
-            setIsPro(false); setVehicleLimit(0); setCurrentTier(null);
+            setCurrentTier(null);
             setUnits('miles'); setMileageInterval(1000);
             setNotificationsEnabled(true); setLocationEnabled(false);
             setOnboardingDone(false); setDisclaimerAgreed(false);
@@ -542,35 +530,12 @@ export default function App() {
   }
 
   // ── STORE-REVIEWER BYPASS ─────────────────────
-  // Triggered by long-pressing the version number in Settings (hidden —
-  // not a visible button). Lets an App Store / Google Play reviewer unlock
-  // full Pro access without a real purchase, since reviewers can't use a
-  // free trial or complete a paid transaction during review. The exact
-  // trigger + code are disclosed directly in each store's restricted-content
-  // declaration, so this isn't meant to be a security secret — just hidden
-  // from ordinary users who'd have no reason to stumble onto it.
+  // Removed for production. Reviewers should use Sandbox accounts.
   function handleReviewCodeSubmit() {
-    if (reviewCodeInputRef.current.trim().toUpperCase() === REVIEWER_UNLOCK_CODE) {
-      setIsPro(true);
-      setVehicleLimit(999);
-      setCurrentTier('reviewer_unlock');
-      AsyncStorage.setItem('autocoach_is_pro', 'true').catch(() => {});
-      AsyncStorage.setItem('autocoach_vehicle_limit', '999').catch(() => {});
-      AsyncStorage.setItem('autocoach_subscribed_tier', 'reviewer_unlock').catch(() => {});
-      setShowReviewModal(false);
-      reviewCodeInputRef.current = '';
-      Alert.alert(
-        '',
-        lang === 'EN'
-          ? 'Reviewer access unlocked — full Pro features enabled on this device.'
-          : 'Acceso de revisor desbloqueado — funciones Pro completas habilitadas en este dispositivo.'
-      );
-    } else {
-      Alert.alert(
-        '',
-        lang === 'EN' ? 'Invalid code.' : 'Código inválido.'
-      );
-    }
+    Alert.alert(
+      '',
+      SOW_TRANSLATIONS[lang]?.reviewer_invalid_code || SOW_TRANSLATIONS.EN.reviewer_invalid_code
+    );
   }
 
   function openAffiliateLink(affiliateKey) {
@@ -1260,40 +1225,29 @@ export default function App() {
 
     if (showReceiptCamera) {
       return (
-        <View style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#fff', fontSize: 18, marginBottom: 20 }}>🧾 {lang === 'EN' ? 'Scan Receipt' : 'Escanear Recibo'}</Text>
-          <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, marginBottom: 40, textAlign: 'center', paddingHorizontal: 40 }}>
-            {lang === 'EN' ? 'Camera capture available in the production app.' : 'La captura de cámara está disponible en la app de producción.'}
-          </Text>
-          {receiptScanning && <ActivityIndicator color={COLORS.accent} size="large" style={{ marginBottom: 20 }} />}
-          <TouchableOpacity
-            style={{ backgroundColor: COLORS.accent, borderRadius: 10, paddingVertical: 13, paddingHorizontal: 32 }}
-            onPress={() => setShowReceiptCamera(false)}
-            disabled={receiptScanning}
-          >
-            <Text style={{ color: '#fff', fontSize: 15, fontWeight: '600' }}>{lang === 'EN' ? 'Back' : 'Volver'}</Text>
-          </TouchableOpacity>
-        </View>
+        <ScannerCamera 
+          lang={lang} 
+          onPhotoTaken={handleReceiptPhotoResult} 
+          onClose={() => setShowReceiptCamera(false)} 
+        />
       );
     }
 
-    // Camera placeholder
     if (showCamera) {
       return (
-        <View style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#fff', fontSize: 18, marginBottom: 20 }}>📸 Camera</Text>
-          <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, marginBottom: 40, textAlign: 'center', paddingHorizontal: 40 }}>
-            {lang === 'EN' ? 'Camera capture available in the production app.' : 'La captura de cámara está disponible en la app de producción.'}
-          </Text>
-          <TouchableOpacity
-            style={{ backgroundColor: COLORS.accent, borderRadius: 10, paddingVertical: 13, paddingHorizontal: 32 }}
-            onPress={() => setShowCamera(false)}
-          >
-            <Text style={{ color: '#fff', fontSize: 15, fontWeight: '600' }}>
-              {lang === 'EN' ? 'Back' : 'Volver'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+        <ScannerCamera 
+          lang={lang} 
+          onPhotoTaken={async (b64) => {
+            setShowCamera(false);
+            const result = await callOCR(b64, 'odometer');
+            if (result && result.mileage) {
+              setMileage(String(result.mileage));
+            } else {
+              Alert.alert('', SOW_TRANSLATIONS[lang]?.odo_read_error || SOW_TRANSLATIONS.EN.odo_read_error);
+            }
+          }} 
+          onClose={() => setShowCamera(false)} 
+        />
       );
     }
 
@@ -1709,20 +1663,11 @@ export default function App() {
 
     if (showVinCamera) {
       return (
-        <View style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#fff', fontSize: 18, marginBottom: 20 }}>📸 {lang === 'EN' ? 'Scan VIN' : 'Escanear VIN'}</Text>
-          <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, marginBottom: 40, textAlign: 'center', paddingHorizontal: 40 }}>
-            {lang === 'EN' ? 'Camera capture available in the production app.' : 'La captura de cámara está disponible en la app de producción.'}
-          </Text>
-          {vinScanning && <ActivityIndicator color={COLORS.accent} size="large" style={{ marginBottom: 20 }} />}
-          <TouchableOpacity
-            style={{ backgroundColor: COLORS.accent, borderRadius: 10, paddingVertical: 13, paddingHorizontal: 32 }}
-            onPress={() => setShowVinCamera(false)}
-            disabled={vinScanning}
-          >
-            <Text style={{ color: '#fff', fontSize: 15, fontWeight: '600' }}>{lang === 'EN' ? 'Back' : 'Volver'}</Text>
-          </TouchableOpacity>
-        </View>
+        <ScannerCamera 
+          lang={lang} 
+          onPhotoTaken={handleVinPhotoResult} 
+          onClose={() => setShowVinCamera(false)} 
+        />
       );
     }
 
@@ -2045,18 +1990,14 @@ export default function App() {
 
     if (showCamera) {
       return (
-        <View style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#fff', fontSize: 18, marginBottom: 20 }}>📸 Camera</Text>
-          <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, marginBottom: 40, textAlign: 'center', paddingHorizontal: 40 }}>
-            {lang === 'EN' ? 'Camera capture available in the production app.' : 'La captura de cámara está disponible en la app de producción.'}
-          </Text>
-          <TouchableOpacity
-            style={{ backgroundColor: COLORS.accent, borderRadius: 10, paddingVertical: 13, paddingHorizontal: 32 }}
-            onPress={() => setShowCamera(false)}
-          >
-            <Text style={{ color: '#fff', fontSize: 15, fontWeight: '600' }}>{lang === 'EN' ? 'Back' : 'Volver'}</Text>
-          </TouchableOpacity>
-        </View>
+        <ScannerCamera 
+          lang={lang} 
+          onPhotoTaken={(b64) => {
+            setDocPhoto(`data:image/jpeg;base64,${b64}`);
+            setShowCamera(false);
+          }} 
+          onClose={() => setShowCamera(false)} 
+        />
       );
     }
 
