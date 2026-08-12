@@ -2,10 +2,11 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity,
-  SafeAreaView, Platform, ScrollView,
+  Platform, ScrollView,
   TextInput, ActivityIndicator, Alert,
   KeyboardAvoidingView, Modal, FlatList, Share, Linking, Switch,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TRANSLATIONS } from './src/translations/TRANSLATIONS';
@@ -14,6 +15,7 @@ import { VEHICLE_LIMITS } from './src/constants/products';
 import { useRevenueCat } from './src/hooks/useRevenueCat';
 import { SOW_TRANSLATIONS } from './src/translations/SowTranslations';
 import SupportChat from './src/components/SupportChat';
+import ScannerCamera from './src/components/ScannerCamera';
 import {
   decodeVIN,
   getMaintenanceSchedule,

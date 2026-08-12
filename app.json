@@ -15,7 +15,8 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.coachplatform.autocoach"
+      "bundleIdentifier": "com.coachplatform.autocoach",
+      "appleTeamId": "K6M568M83F"
     },
     "android": {
       "package": "com.coachplatform.autocoach",

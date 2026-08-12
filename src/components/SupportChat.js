@@ -22,8 +22,9 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
   StyleSheet, KeyboardAvoidingView, Platform, Linking,
-  ActivityIndicator, SafeAreaView,
+  ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { TRANSLATIONS } from '../translations/TRANSLATIONS';
 
 // ── CONFIG ────────────────────────────────────────────────
