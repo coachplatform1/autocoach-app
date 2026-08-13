@@ -1835,6 +1835,30 @@ export const TRANSLATIONS = {
     EN: "No",
     ES: "No",
   },
+  alert_sub_title: {
+    EN: "Already Subscribed",
+    ES: "Suscripción Activa",
+  },
+  alert_sub_body: {
+    EN: "You already have an active subscription to AutoCoach.",
+    ES: "Ya tienes una suscripción activa a AutoCoach.",
+  },
+  alert_error_title: {
+    EN: "Purchase Error",
+    ES: "Error de Compra",
+  },
+  alert_restore_fail_title: {
+    EN: "Restore Failed",
+    ES: "Error al Restaurar",
+  },
+  alert_restore_fail_body: {
+    EN: "No active subscription found to restore.",
+    ES: "No se encontró ninguna suscripción activa para restaurar.",
+  },
+  alert_restore_error_title: {
+    EN: "Restore Error",
+    ES: "Error de Restauración",
+  },
 };
 
 // ============================================================

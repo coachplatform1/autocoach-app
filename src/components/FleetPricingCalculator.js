@@ -359,7 +359,7 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
               style={[s.toggleBtn, billingCycle === 'monthly' && s.toggleBtnActive]}
               onPress={() => setBilling('monthly')}
             >
-              <Text style={[s.toggleText, billingCycle === 'monthly' && s.toggleTextActive]}>
+              <Text style={[s.toggleText, billingCycle === 'monthly' && s.toggleTextActive]} adjustsFontSizeToFit numberOfLines={1}>
                 {T('calc_monthly_label')}
               </Text>
             </TouchableOpacity>
@@ -367,7 +367,7 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
               style={[s.toggleBtn, billingCycle === 'annual' && s.toggleBtnActive]}
               onPress={() => setBilling('annual')}
             >
-              <Text style={[s.toggleText, billingCycle === 'annual' && s.toggleTextActive]}>
+              <Text style={[s.toggleText, billingCycle === 'annual' && s.toggleTextActive]} adjustsFontSizeToFit numberOfLines={1}>
                 {T('calc_annual_label')}
               </Text>
             </TouchableOpacity>
@@ -444,12 +444,12 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
 
       {/* Primary CTA */}
       <TouchableOpacity style={s.primaryBtn} onPress={handlePrimary} activeOpacity={0.85}>
-        <Text style={s.primaryBtnText}>{primaryLabel()}</Text>
+        <Text style={s.primaryBtnText} adjustsFontSizeToFit numberOfLines={1}>{primaryLabel()}</Text>
       </TouchableOpacity>
 
       {/* Secondary CTA */}
       <TouchableOpacity style={s.secondaryBtn} onPress={handleSecondary} activeOpacity={0.85}>
-        <Text style={s.secondaryBtnText}>{secondaryLabel()}</Text>
+        <Text style={s.secondaryBtnText} adjustsFontSizeToFit numberOfLines={1}>{secondaryLabel()}</Text>
       </TouchableOpacity>
 
     </View>

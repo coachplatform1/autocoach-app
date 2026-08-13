@@ -556,7 +556,7 @@ export default function App() {
       case 'garage':        return <GarageScreen />;
       case 'schedule':      return <ScheduleScreen />;
       case 'shop':          return <ShopScreen />;
-      case 'paywall':       return <PaywallScreen />;
+      case 'paywall':       return PaywallScreen();
       case 'settings':      return <SettingsScreen />;
       case 'documents':     return <DocumentsScreen />;
       case 'accidentChecklist': return <AccidentChecklistScreen />;
@@ -1581,13 +1581,12 @@ export default function App() {
           onContact={handleEnterpriseContact}
         />
 
-        <View style={s.paywallFooterRow}>
-          <TouchableOpacity onPress={handleRestorePurchases}>
+        <View style={[s.paywallFooterRow, { flexWrap: 'wrap', paddingHorizontal: 20 }]}>
+          <TouchableOpacity onPress={handleRestorePurchases} hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}>
             <Text style={s.paywallFooterLink}>{T('paywall_restore')}</Text>
           </TouchableOpacity>
-          <Text style={s.paywallFooterDot}>·</Text>
-          <TouchableOpacity onPress={() => Linking.openURL('https://coachplatform.app/privacy.html')}>
-            <Text style={s.paywallFooterLink}>{T('paywall_terms')}</Text>
+          <TouchableOpacity onPress={() => Linking.openURL('https://coachplatform.app/privacy.html')} hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}>
+            <Text style={[s.paywallFooterLink, { textAlign: 'center' }]}>{T('paywall_terms')}</Text>
           </TouchableOpacity>
         </View>
 
