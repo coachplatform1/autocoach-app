@@ -16,7 +16,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.coachplatform.autocoach",
-      "appleTeamId": "K6M568M83F"
+      "appleTeamId": "K6M568M83F",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "buildNumber": "2"
     },
     "android": {
       "package": "com.coachplatform.autocoach",
