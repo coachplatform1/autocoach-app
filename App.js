@@ -94,6 +94,37 @@ const REVIEWER_UNLOCK_CODE = 'AUTOCOACH-REVIEW-2026';
 // header comment for the four modes it supports.
 const OCR_ENDPOINT = 'https://coachplatform.app/.netlify/functions/ocr';
 
+// Official NHTSA recalls-by-vehicle endpoint. Free, no API key required.
+// Docs: https://www.nhtsa.gov/nhtsa-datasets-and-apis
+// Called directly from the app (no backend proxy needed — this is public
+// government data, unlike the OCR endpoint which hides an API key).
+const NHTSA_RECALLS_ENDPOINT = 'https://api.nhtsa.gov/recalls/recallsByVehicle';
+
+// Returns null on network/fetch failure (distinct from [] = successfully
+// checked, zero open recalls) so the UI can tell "couldn't check" apart
+// from "checked, all clear."
+async function fetchRecalls(make, model, year) {
+  try {
+    const url = `${NHTSA_RECALLS_ENDPOINT}?make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}&modelYear=${encodeURIComponent(year)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`NHTSA API returned ${res.status}`);
+    const json = await res.json();
+    const results = json.results || json.Results || [];
+    return results.map(r => ({
+      campaignNumber: r.NHTSACampaignNumber || r.nhtsaCampaignNumber || r.CampaignNumber || '',
+      component:      r.Component || r.component || '',
+      summary:        r.Summary || r.summary || '',
+      consequence:    r.Consequence || r.consequence || '',
+      remedy:         r.Remedy || r.remedy || '',
+      reportDate:     r.ReportReceivedDate || r.reportReceivedDate || '',
+      manufacturer:   r.Manufacturer || r.manufacturer || '',
+    }));
+  } catch (err) {
+    console.error('NHTSA recalls fetch failed:', err);
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────────
 // SCROLL PICKER COMPONENT
 // ─────────────────────────────────────────────
@@ -296,6 +327,8 @@ export default function App() {
   const [showReviewModal, setShowReviewModal] = useState(false);
   const reviewCodeInputRef = useRef('');
   const [documents, setDocuments]             = useState([]);
+  const [recallsCache, setRecallsCache]       = useState({}); // vKey -> array | null (undefined = not yet loaded)
+  const [recallsLoading, setRecallsLoading]   = useState({}); // vKey -> bool
 
   useEffect(() => {
     AsyncStorage.getItem('autocoach_lang').then(s => { if (s) setLang(s); });
@@ -379,6 +412,19 @@ export default function App() {
   function saveDocuments(updated) {
     setDocuments(updated);
     AsyncStorage.setItem('autocoach_documents', JSON.stringify(updated)).catch(() => {});
+  }
+
+  // Cached per vehicle (year+make+model) so switching between vehicle
+  // chips doesn't re-hit NHTSA's API every time — only fetches once per
+  // vehicle per app session.
+  async function loadRecallsForVehicle(vehicle) {
+    if (!vehicle) return;
+    const vKey = `${vehicle.year}_${vehicle.make}_${vehicle.model}`;
+    if (recallsCache[vKey] !== undefined) return;
+    setRecallsLoading(prev => ({ ...prev, [vKey]: true }));
+    const results = await fetchRecalls(vehicle.make, vehicle.model, vehicle.year);
+    setRecallsCache(prev => ({ ...prev, [vKey]: results }));
+    setRecallsLoading(prev => ({ ...prev, [vKey]: false }));
   }
 
   // Calls the ocr.js Netlify function with a base64 photo and returns the
@@ -657,6 +703,10 @@ export default function App() {
   // MAINTENANCE SCHEDULE SCREEN
   // ─────────────────────────────────────────────
   function ScheduleScreen() {
+    useEffect(() => {
+      if (activeVehicle) loadRecallsForVehicle(activeVehicle);
+    }, [activeVehicle]);
+
     if (!activeVehicle) {
       return (
         <View style={s.emptyWrap}>
@@ -672,6 +722,8 @@ export default function App() {
     const vKey = `${activeVehicle.year}_${activeVehicle.make}_${activeVehicle.model}`;
     const schedule = getMaintenanceSchedule(activeVehicle.make, activeVehicle.model, activeVehicle.engine);
     const currentMileage = activeVehicle.mileage ? Number(activeVehicle.mileage) : 0;
+    const recalls = recallsCache[vKey];
+    const recallsAreLoading = !!recallsLoading[vKey];
 
     let services = [];
     if (schedule) {
@@ -714,6 +766,56 @@ export default function App() {
       );
     }
 
+    function RecallCard({ recall }) {
+      const [expanded, setExpanded] = useState(false);
+      const summary = recall.summary || '';
+      const truncated = summary.length > 110 ? summary.slice(0, 110) + '…' : summary;
+      return (
+        <TouchableOpacity
+          style={[s.card, { borderColor: COLORS.overdueText, borderWidth: 1 }]}
+          onPress={() => setExpanded(!expanded)}
+          activeOpacity={0.8}
+        >
+          <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.overdueText, marginBottom: 4 }}>
+            {recall.component || (lang === 'EN' ? 'Recall' : 'Retiro')}
+          </Text>
+          <Text style={{ fontSize: 12, color: COLORS.textMuted, lineHeight: 17 }}>
+            {expanded ? summary : truncated}
+          </Text>
+          {expanded && (
+            <>
+              {recall.consequence ? (
+                <View style={{ marginTop: 10 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textNavy }}>
+                    {lang === 'EN' ? 'Consequence' : 'Consecuencia'}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: COLORS.textMuted, lineHeight: 17 }}>{recall.consequence}</Text>
+                </View>
+              ) : null}
+              {recall.remedy ? (
+                <View style={{ marginTop: 10 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textNavy }}>
+                    {lang === 'EN' ? 'Remedy' : 'Solución'}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: COLORS.textMuted, lineHeight: 17 }}>{recall.remedy}</Text>
+                </View>
+              ) : null}
+              {recall.campaignNumber ? (
+                <Text style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 8 }}>
+                  NHTSA #{recall.campaignNumber}
+                </Text>
+              ) : null}
+            </>
+          )}
+          <Text style={{ fontSize: 11, color: COLORS.accent, fontWeight: '600', marginTop: 8 }}>
+            {expanded
+              ? (lang === 'EN' ? 'Show less ▲' : 'Ver menos ▲')
+              : (lang === 'EN' ? 'Tap for details ▼' : 'Toca para detalles ▼')}
+          </Text>
+        </TouchableOpacity>
+      );
+    }
+
     return (
       <ScrollView style={s.screen} contentContainerStyle={s.screenContent}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.vehicleChipRow}>
@@ -749,6 +851,40 @@ export default function App() {
           )}
         </View>
 
+        {/* Live NHTSA safety recalls — separate from the vehicleDatabase
+            notes field above, which is static manufacturer guidance, not
+            a real-time recall check. */}
+        {recallsAreLoading && (
+          <View style={[s.card, { alignItems: 'center', paddingVertical: 16 }]}>
+            <ActivityIndicator color={COLORS.accent} size="small" />
+            <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 8 }}>
+              {lang === 'EN' ? 'Checking for open recalls...' : 'Verificando retiros abiertos...'}
+            </Text>
+          </View>
+        )}
+        {recalls === null && !recallsAreLoading && (
+          <View style={[s.card, { paddingVertical: 12 }]}>
+            <Text style={{ fontSize: 12, color: COLORS.textMuted, textAlign: 'center' }}>
+              {lang === 'EN' ? 'Could not check for recalls — check your connection.' : 'No se pudo verificar retiros — revisa tu conexión.'}
+            </Text>
+          </View>
+        )}
+        {recalls && recalls.length > 0 && (
+          <View style={s.serviceSection}>
+            <Text style={[s.serviceSectionTitle, { color: COLORS.overdueText }]}>
+              🚨 {lang === 'EN' ? 'Open Safety Recalls' : 'Retiros de Seguridad Abiertos'} ({recalls.length})
+            </Text>
+            {recalls.map((r, i) => <RecallCard key={i} recall={r} />)}
+          </View>
+        )}
+        {recalls && recalls.length === 0 && (
+          <View style={[s.card, { backgroundColor: COLORS.okBg, borderColor: COLORS.okText, alignItems: 'center', paddingVertical: 14 }]}>
+            <Text style={{ fontSize: 13, color: COLORS.okText, fontWeight: '600' }}>
+              ✓ {lang === 'EN' ? 'No open recalls for this vehicle' : 'Sin retiros abiertos para este vehículo'}
+            </Text>
+          </View>
+        )}
+
         {overdue.length > 0 && (
           <View style={s.serviceSection}>
             <Text style={s.serviceSectionTitle}>🔴 {T('svc_status_overdue')} ({overdue.length})</Text>
@@ -772,6 +908,34 @@ export default function App() {
             <Text style={{ fontSize: 13, color: COLORS.accentDark, lineHeight: 18 }}>⚠ {schedule.notes}</Text>
           </View>
         )}
+
+        {/* Quick Actions — fills the space below the service list with
+            real shortcuts for this vehicle instead of empty scroll area. */}
+        <Text style={s.serviceSectionTitle}>{lang === 'EN' ? 'Quick Actions' : 'Acciones Rápidas'}</Text>
+        <View style={s.quickActionsGrid}>
+          <TouchableOpacity style={s.quickActionCard} onPress={() => setActiveTab('shop')}>
+            <Text style={s.quickActionIcon}>🛒</Text>
+            <Text style={s.quickActionLabel}>{lang === 'EN' ? 'Shop Parts' : 'Comprar Piezas'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.quickActionCard} onPress={() => setActiveTab('fuel')}>
+            <Text style={s.quickActionIcon}>⛽</Text>
+            <Text style={s.quickActionLabel}>{lang === 'EN' ? 'Log Fuel' : 'Registrar Combustible'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.quickActionCard} onPress={() => setActiveTab('documents')}>
+            <Text style={s.quickActionIcon}>📁</Text>
+            <Text style={s.quickActionLabel}>{lang === 'EN' ? 'Documents' : 'Documentos'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.quickActionCard} onPress={() => setActiveTab('accidentChecklist')}>
+            <Text style={s.quickActionIcon}>🚨</Text>
+            <Text style={s.quickActionLabel}>{lang === 'EN' ? 'Accident Checklist' : 'Lista de Accidente'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={s.brandFooter}>
+          <Text style={s.brandFooterIcon}>🚗</Text>
+          <Text style={s.brandFooterText}>AutoCoach</Text>
+          <Text style={s.brandFooterSub}>{lang === 'EN' ? 'Track it. Trust it.' : 'Rastréalo. Confía en él.'}</Text>
+        </View>
       </ScrollView>
     );
   }
@@ -1092,7 +1256,7 @@ export default function App() {
 
         {/* Edmunds resale value banner */}
         {allEntries.length >= 3 && (
-          <TouchableOpacity style={s.edmundsBanner}>
+          <TouchableOpacity style={s.edmundsBanner} onPress={() => openAffiliateLink('EDMUNDS')}>
             <Text style={s.edmundsBannerTitle}>
               📈 {lang === 'EN' ? 'Know your vehicle\'s value' : 'Conoce el valor de tu vehículo'}
             </Text>
@@ -1376,7 +1540,7 @@ export default function App() {
           </View>
         )}
 
-        <TouchableOpacity style={s.upsideBanner}>
+        <TouchableOpacity style={s.upsideBanner} onPress={() => openAffiliateLink('UPSIDE')}>
           <Text style={s.upsideBannerTitle}>⛽ {lang === 'EN' ? 'AutoCoach Fuel Rewards' : 'Recompensas de Combustible'}</Text>
           <Text style={s.upsideBannerBody}>{lang === 'EN' ? 'Earn up to 25¢/gal cashback at 45,000+ stations' : 'Gana hasta 25¢/gal de reembolso en más de 45,000 gasolineras'}</Text>
           <Text style={s.upsideBannerCta}>{lang === 'EN' ? 'Learn more →' : 'Más información →'}</Text>
@@ -1585,8 +1749,13 @@ export default function App() {
           <TouchableOpacity onPress={handleRestorePurchases} hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}>
             <Text style={s.paywallFooterLink}>{T('paywall_restore')}</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => Linking.openURL('https://coachplatform.app/privacy.html')} hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}>
+          <Text style={s.paywallFooterDot}>·</Text>
+          <TouchableOpacity onPress={() => Linking.openURL('https://coachplatform.app/terms.html')} hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}>
             <Text style={[s.paywallFooterLink, { textAlign: 'center' }]}>{T('paywall_terms')}</Text>
+          </TouchableOpacity>
+          <Text style={s.paywallFooterDot}>·</Text>
+          <TouchableOpacity onPress={() => Linking.openURL('https://coachplatform.app/privacy.html')} hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}>
+            <Text style={[s.paywallFooterLink, { textAlign: 'center' }]}>{T('settings_privacy')}</Text>
           </TouchableOpacity>
         </View>
 
@@ -2342,15 +2511,20 @@ const s = StyleSheet.create({
 
   // Shop screen
   shopSubtitle:    { fontSize: 13, color: COLORS.textMuted, marginTop: -12, marginBottom: 16 },
-  shopCard:        { backgroundColor: COLORS.cardBg, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.border, padding: 14, marginBottom: 12 },
-  shopCardHeader:  { flexDirection: 'row', marginBottom: 10, alignItems: 'flex-start' },
-  shopCardIcon:    { fontSize: 28, marginRight: 12 },
-  shopCardTitle:   { fontSize: 15, fontWeight: '600', color: COLORS.textNavy },
-  shopCardBody:    { fontSize: 12, color: COLORS.textMuted, marginTop: 2, lineHeight: 17 },
-  shopBuyBtn:      { backgroundColor: COLORS.accent, borderRadius: 8, paddingVertical: 11, alignItems: 'center' },
-  shopBuyBtnText:  { color: COLORS.white, fontSize: 13, fontWeight: '600' },
-  shopAltRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 10 },
-  shopAltLink:     { fontSize: 12, color: COLORS.accent, fontWeight: '500', textDecorationLine: 'underline' },
+  shopCard:        {
+    backgroundColor: COLORS.cardBg, borderRadius: 18, borderWidth: 0.5, borderColor: COLORS.border,
+    padding: 20, marginBottom: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 8,
+    elevation: 3,
+  },
+  shopCardHeader:  { flexDirection: 'row', marginBottom: 14, alignItems: 'center' },
+  shopCardIcon:    { fontSize: 38, marginRight: 16 },
+  shopCardTitle:   { fontSize: 18, fontWeight: '700', color: COLORS.textNavy, marginBottom: 3 },
+  shopCardBody:    { fontSize: 13.5, color: COLORS.textMuted, marginTop: 2, lineHeight: 19 },
+  shopBuyBtn:      { backgroundColor: COLORS.accent, borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
+  shopBuyBtnText:  { color: COLORS.white, fontSize: 15, fontWeight: '700' },
+  shopAltRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: 16, marginTop: 12 },
+  shopAltLink:     { fontSize: 13, color: COLORS.accent, fontWeight: '600', textDecorationLine: 'underline' },
   shopDisclaimerBox:  { marginTop: 6, marginBottom: 20, paddingHorizontal: 4 },
   shopDisclaimerText: { fontSize: 10, color: COLORS.textMuted, lineHeight: 14, textAlign: 'center' },
 
@@ -2395,6 +2569,21 @@ const s = StyleSheet.create({
   segmentBtnActive:  { backgroundColor: COLORS.primary },
   segmentText:       { fontSize: 12, color: COLORS.textMuted },
   segmentTextActive: { color: COLORS.white, fontWeight: '600' },
+
+  // Vehicle detail page — Quick Actions + brand footer (fills empty scroll space)
+  quickActionsGrid:  { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 8 },
+  quickActionCard:   {
+    width: '47%', backgroundColor: COLORS.cardBg, borderRadius: 14, borderWidth: 0.5, borderColor: COLORS.border,
+    paddingVertical: 20, alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 1,
+  },
+  quickActionIcon:   { fontSize: 30, marginBottom: 8 },
+  quickActionLabel:  { fontSize: 13, fontWeight: '600', color: COLORS.textNavy, textAlign: 'center' },
+
+  brandFooter:       { alignItems: 'center', paddingVertical: 28, opacity: 0.45 },
+  brandFooterIcon:   { fontSize: 32, marginBottom: 6 },
+  brandFooterText:   { fontSize: 16, fontWeight: '700', color: COLORS.primary, letterSpacing: 1 },
+  brandFooterSub:    { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
 
   // Reviewer-unlock modal
   reviewModalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
