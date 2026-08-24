@@ -321,6 +321,7 @@ export default function App() {
   const [currentTier, setCurrentTier]         = useState(null);
   const [units, setUnits]                     = useState('miles');
   const [mileageInterval, setMileageInterval] = useState(1000);
+  const [intervalScale, setIntervalScale] = useState(1.0);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [showSupportChat, setShowSupportChat] = useState(false);
@@ -340,6 +341,7 @@ export default function App() {
     // Settings preferences
     AsyncStorage.getItem('autocoach_units').then(s => { if (s) setUnits(s); });
     AsyncStorage.getItem('autocoach_mileage_interval').then(s => { if (s) setMileageInterval(parseInt(s, 10) || 1000); });
+    AsyncStorage.getItem('autocoach_interval_scale').then(s => { if (s) setIntervalScale(Math.min(1.0, Math.max(0.5, parseFloat(s) || 1.0))); });
     AsyncStorage.getItem('autocoach_notifications_enabled').then(s => { if (s !== null) setNotificationsEnabled(s === 'true'); });
     AsyncStorage.getItem('autocoach_location_enabled').then(s => { if (s === 'true') setLocationEnabled(true); });
   }, []);
@@ -518,6 +520,12 @@ export default function App() {
     AsyncStorage.setItem('autocoach_mileage_interval', String(next)).catch(() => {});
   }
 
+  function setIntervalScaleAndSave(next) {
+    const clamped = Math.min(1.0, Math.max(0.5, next)); // never exceed manufacturer spec, never below 50%
+    setIntervalScale(clamped);
+    AsyncStorage.setItem('autocoach_interval_scale', String(clamped)).catch(() => {});
+  }
+
   function toggleNotifications(next) {
     setNotificationsEnabled(next);
     AsyncStorage.setItem('autocoach_notifications_enabled', String(next)).catch(() => {});
@@ -559,7 +567,7 @@ export default function App() {
                 'autocoach_lang', 'autocoach_vehicles', 'autocoach_service_history',
                 'autocoach_fuel_log', 'autocoach_is_pro', 'autocoach_vehicle_limit',
                 'autocoach_subscribed_tier', 'autocoach_onboarding_complete',
-                'autocoach_disclaimer_agreed', 'autocoach_units', 'autocoach_mileage_interval',
+                'autocoach_disclaimer_agreed', 'autocoach_units', 'autocoach_mileage_interval', 'autocoach_interval_scale',
                 'autocoach_notifications_enabled', 'autocoach_location_enabled',
               ]);
             } catch (err) {
@@ -567,7 +575,7 @@ export default function App() {
             }
             setVehicles([]); setActiveVehicle(null); setServiceHistory({}); setFuelLog([]);
             setCurrentTier(null);
-            setUnits('miles'); setMileageInterval(1000);
+            setUnits('miles'); setMileageInterval(1000); setIntervalScale(1.0);
             setNotificationsEnabled(true); setLocationEnabled(false);
             setOnboardingDone(false); setDisclaimerAgreed(false);
             setActiveTab('garage');
@@ -623,7 +631,7 @@ export default function App() {
       const schedule = getMaintenanceSchedule(v.make, v.model, v.engine);
       if (schedule && v.mileage) {
         const vKey = `${v.year}_${v.make}_${v.model}`;
-        const due = calculateDueServices(schedule.services, Number(v.mileage), serviceHistory[vKey] || {}, mileageInterval);
+        const due = calculateDueServices(schedule.services, Number(v.mileage), serviceHistory[vKey] || {}, mileageInterval, intervalScale);
         totalDue += due.filter(s => s.status === 'overdue' || s.status === 'due_soon').length;
       }
     });
@@ -660,7 +668,7 @@ export default function App() {
             const vKey = `${vehicle.year}_${vehicle.make}_${vehicle.model}`;
             let overdueCount = 0, soonCount = 0;
             if (schedule && vehicle.mileage) {
-              const due = calculateDueServices(schedule.services, Number(vehicle.mileage), serviceHistory[vKey] || {}, mileageInterval);
+              const due = calculateDueServices(schedule.services, Number(vehicle.mileage), serviceHistory[vKey] || {}, mileageInterval, intervalScale);
               overdueCount = due.filter(s => s.status === 'overdue').length;
               soonCount = due.filter(s => s.status === 'due_soon').length;
             }
@@ -727,7 +735,7 @@ export default function App() {
 
     let services = [];
     if (schedule) {
-      services = calculateDueServices(schedule.services, currentMileage, serviceHistory[vKey] || {}, mileageInterval);
+      services = calculateDueServices(schedule.services, currentMileage, serviceHistory[vKey] || {}, mileageInterval, intervalScale);
     }
 
     const overdue = services.filter(s => s.status === 'overdue');
@@ -1562,7 +1570,7 @@ export default function App() {
 
     let dueNow = [], comingUp = [];
     if (schedule && shopVehicle?.mileage) {
-      const due = calculateDueServices(schedule.services, Number(shopVehicle.mileage), serviceHistory[vKey] || {}, mileageInterval);
+      const due = calculateDueServices(schedule.services, Number(shopVehicle.mileage), serviceHistory[vKey] || {}, mileageInterval, intervalScale);
       dueNow   = due.filter(sv => sv.status === 'overdue');
       comingUp = due.filter(sv => sv.status === 'due_soon');
     }
@@ -1995,6 +2003,32 @@ export default function App() {
               </TouchableOpacity>
             ))}
           </View>
+
+          <View style={s.settingsDivider} />
+
+          <Text style={s.settingsSubLabel}>
+            {lang === 'EN' ? 'Fluid & Service Intervals' : 'Intervalos de Fluidos y Servicio'}
+          </Text>
+          <View style={s.segmentRow}>
+            {[
+              [1.0, lang === 'EN' ? 'Manufacturer Spec' : 'Especificación del Fabricante'],
+              [0.75, '75%'],
+              [0.5, lang === 'EN' ? 'Conservative' : 'Conservador'],
+            ].map(([val, label]) => (
+              <TouchableOpacity
+                key={val}
+                style={[s.segmentBtn, intervalScale === val && s.segmentBtnActive]}
+                onPress={() => setIntervalScaleAndSave(val)}
+              >
+                <Text style={[s.segmentText, intervalScale === val && s.segmentTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Text style={s.settingsNote}>
+            {lang === 'EN'
+              ? 'Applies to fluids with both a mileage and time limit (oil, transmission, coolant, brake fluid, etc.). Manufacturer Spec uses the full recommended interval. Conservative changes fluids at half the manufacturer interval — never beyond it.'
+              : 'Se aplica a fluidos con límite de kilometraje y tiempo (aceite, transmisión, refrigerante, líquido de frenos, etc.). La opción del fabricante usa el intervalo completo recomendado. Conservador cambia los fluidos a la mitad del intervalo del fabricante — nunca lo excede.'}
+          </Text>
 
           <View style={s.settingsDivider} />
 

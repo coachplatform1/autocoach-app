@@ -715,19 +715,63 @@ export function getYearsForMakeModel(make, model) {
   return vehicle ? vehicle.years : [];
 }
 
-export function calculateDueServices(services, currentMileage, serviceHistory = {}, dueSoonThreshold = 1500) {
+// intervalScale: 0.5–1.0, where 1.0 = full manufacturer-recommended interval
+// and 0.5 = half the manufacturer interval (e.g. 10,000mi/12mo -> 5,000mi/6mo).
+// Only ever scales DOWN from spec — never exceeds the manufacturer maximum.
+// Applied identically to interval_miles and interval_months so the two always
+// stay in the same ratio the manufacturer specified.
+export function calculateDueServices(services, currentMileage, serviceHistory = {}, dueSoonThreshold = 1500, intervalScale = 1.0) {
+  const scale = Math.min(1.0, Math.max(0.5, intervalScale));
+  const now = new Date();
+
   return services.map(service => {
     const history = serviceHistory[service.id];
     const lastMileage = history?.lastMileage || 0;
-    const milesUntilDue = service.interval_miles
-      ? (lastMileage + service.interval_miles) - currentMileage
+    const lastDate = history?.lastDate ? new Date(history.lastDate) : null;
+
+    const effectiveMiles = service.interval_miles ? Math.round(service.interval_miles * scale) : null;
+    const effectiveMonths = service.interval_months ? service.interval_months * scale : null;
+
+    const milesUntilDue = effectiveMiles
+      ? (lastMileage + effectiveMiles) - currentMileage
       : null;
-    let status = 'ok';
-    if (milesUntilDue !== null) {
-      if (milesUntilDue <= 0) status = 'overdue';
-      else if (milesUntilDue <= dueSoonThreshold) status = 'due_soon';
+
+    // Time-based due date, projected from the last time this was logged.
+    // If it's never been logged, there's no known start date to project
+    // from, so time-based status is skipped for that service (mileage-only
+    // status still applies if available).
+    let monthsUntilDue = null;
+    let dueDate = null;
+    if (effectiveMonths && lastDate) {
+      dueDate = new Date(lastDate);
+      dueDate.setMonth(dueDate.getMonth() + Math.floor(effectiveMonths));
+      dueDate.setDate(dueDate.getDate() + Math.round((effectiveMonths % 1) * 30));
+      const msUntilDue = dueDate.getTime() - now.getTime();
+      monthsUntilDue = msUntilDue / (1000 * 60 * 60 * 24 * 30.44);
     }
-    return { ...service, lastMileage, milesUntilDue, status };
+
+    // "Whichever comes first" — mirrors how manufacturers actually define
+    // these intervals (e.g. Ford: 10,000 miles OR 12 months, whichever
+    // comes first). Take the more urgent of the two available signals.
+    let milesStatus = 'ok';
+    if (milesUntilDue !== null) {
+      if (milesUntilDue <= 0) milesStatus = 'overdue';
+      else if (milesUntilDue <= dueSoonThreshold) milesStatus = 'due_soon';
+    }
+    let timeStatus = 'ok';
+    if (monthsUntilDue !== null) {
+      if (monthsUntilDue <= 0) timeStatus = 'overdue';
+      else if (monthsUntilDue <= 1) timeStatus = 'due_soon'; // within ~1 month
+    }
+    const statusRank = { overdue: 0, due_soon: 1, ok: 2 };
+    const status = statusRank[milesStatus] <= statusRank[timeStatus] ? milesStatus : timeStatus;
+
+    return {
+      ...service,
+      interval_miles_effective: effectiveMiles,
+      interval_months_effective: effectiveMonths,
+      lastMileage, lastDate, milesUntilDue, monthsUntilDue, dueDate, status,
+    };
   }).sort((a, b) => ({ overdue:0, due_soon:1, ok:2 }[a.status] - { overdue:0, due_soon:1, ok:2 }[b.status]));
 }
 
