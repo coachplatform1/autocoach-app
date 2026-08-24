@@ -27,5 +27,8 @@
   "private": true,
   "overrides": {
     "expo-font": "14.0.12"
+  },
+  "devDependencies": {
+    "@bam.tech/react-native-make": "^3.0.3"
   }
 }
