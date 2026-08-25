@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TRANSLATIONS } from './src/translations/TRANSLATIONS';
 import { COLORS } from './src/constants/colors';
@@ -98,7 +99,55 @@ const OCR_ENDPOINT = 'https://coachplatform.app/.netlify/functions/ocr';
 // Docs: https://www.nhtsa.gov/nhtsa-datasets-and-apis
 // Called directly from the app (no backend proxy needed — this is public
 // government data, unlike the OCR endpoint which hides an API key).
-const NHTSA_RECALLS_ENDPOINT = 'https://api.nhtsa.gov/recalls/recallsByVehicle';
+// Controls how a notification behaves if it fires while the app is
+// actually open in the foreground — still show it, since a maintenance
+// reminder is worth surfacing even if you're already in the app.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
+// Matches the Android notification channel Ankit configured in app.json's
+// expo-notifications plugin config ("defaultChannel"). Must match exactly.
+const NOTIFICATION_CHANNEL_ID = 'maintenance-reminders';
+
+// Estimates a vehicle's average daily mileage from its fuel log history,
+// so mileage-based reminders (which can't fire the instant an odometer
+// threshold is crossed, since the app only knows mileage when you tell it)
+// can instead be scheduled for a projected calendar date. Needs at least
+// two fuel entries spanning a few real days to trust the rate — with too
+// little data, returns null and mileage-based reminders are simply skipped
+// for that vehicle rather than guessing.
+function calculateAvgMilesPerDay(fuelLog, vehicleKey) {
+  const entries = fuelLog
+    .filter(e => e.vehicleKey === vehicleKey && e.mileage && e.date)
+    .map(e => ({ mileage: e.mileage, date: new Date(e.date) }))
+    .sort((a, b) => a.date - b.date);
+  if (entries.length < 2) return null;
+  const first = entries[0], last = entries[entries.length - 1];
+  const daySpan = (last.date - first.date) / (1000 * 60 * 60 * 24);
+  const mileSpan = last.mileage - first.mileage;
+  if (daySpan < 3 || mileSpan <= 0) return null; // too little spread to trust the rate
+  return mileSpan / daySpan;
+}
+
+// Projects the calendar date a vehicle is expected to reach targetMileage,
+// given its current mileage and an average daily driving rate. Returns
+// null if there's no reliable rate to project from.
+function projectDateAtMileage(currentMileage, targetMileage, avgMilesPerDay) {
+  if (!avgMilesPerDay || avgMilesPerDay <= 0) return null;
+  const milesAway = targetMileage - currentMileage;
+  if (milesAway <= 0) return new Date(); // already there or past it
+  const daysAway = milesAway / avgMilesPerDay;
+  const d = new Date();
+  d.setDate(d.getDate() + Math.round(daysAway));
+  return d;
+}
+
+
 
 // Returns null on network/fetch failure (distinct from [] = successfully
 // checked, zero open recalls) so the UI can tell "couldn't check" apart
@@ -346,6 +395,17 @@ export default function App() {
     AsyncStorage.getItem('autocoach_location_enabled').then(s => { if (s === 'true') setLocationEnabled(true); });
   }, []);
 
+  // Rescheduling runs whenever anything that affects due dates or intervals
+  // changes — new mileage, a new fuel entry (which shifts the driving-rate
+  // estimate), a logged service, or the interval scale setting. Skips the
+  // very first render (checkingGate still true / vehicles not yet loaded
+  // from storage) so it doesn't fire against empty data before storage
+  // has actually finished loading.
+  useEffect(() => {
+    if (checkingGate) return;
+    rescheduleAllNotifications();
+  }, [vehicles, serviceHistory, fuelLog, intervalScale, mileageInterval, checkingGate]);
+
   // First-launch gate: onboarding carousel + legal disclaimer must both
   // be completed once before the main tabs are shown (mirrors PoolCoach).
   // Hardened: wrapped in try/catch/finally + a hard timeout so a storage
@@ -427,6 +487,142 @@ export default function App() {
     const results = await fetchRecalls(vehicle.make, vehicle.model, vehicle.year);
     setRecallsCache(prev => ({ ...prev, [vKey]: results }));
     setRecallsLoading(prev => ({ ...prev, [vKey]: false }));
+  }
+
+  // Actually requests the OS-level notification permission — the Settings
+  // toggle previously only flipped a local boolean without ever asking iOS
+  // or Android for real permission, so no notification could ever have
+  // fired regardless of the toggle's state.
+  async function requestNotificationPermissions() {
+    try {
+      const { status: existing } = await Notifications.getPermissionsAsync();
+      if (existing === 'granted') return true;
+      const { status } = await Notifications.requestPermissionsAsync();
+      return status === 'granted';
+    } catch (err) {
+      console.error('Notification permission request failed:', err);
+      return false;
+    }
+  }
+
+  // Schedules the reminders for a single service on a single vehicle.
+  // Two independent tracks, per manufacturer "whichever comes first" logic:
+  //
+  //  TIME track (precise): only possible when this service has a real
+  //  dueDate (i.e. it's been logged at least once before, so we know a
+  //  real start date to count forward from). Fires exactly on schedule —
+  //  a 2-week advance notice, then again on the due date itself.
+  //
+  //  MILEAGE track (projected estimate): only possible when we have a
+  //  trustworthy average-miles-per-day rate from the fuel log. Since the
+  //  app can't know the instant an odometer threshold is crossed while
+  //  it's closed, this projects the calendar date the vehicle is likely
+  //  to reach the 500-mile-warning point and the due point, and schedules
+  //  notifications for those estimated dates. Framed honestly in the
+  //  copy as an estimate ("based on your driving"), not a certainty —
+  //  the in-app due status (driven by your actual logged mileage) is
+  //  always the source of truth; this is just an early nudge to go check.
+  async function scheduleServiceReminders(vehicle, svc, avgMilesPerDay) {
+    const vehicleLabel = `${vehicle.year} ${vehicle.make} ${vehicle.model}`;
+    const svcName = lang === 'ES' ? svc.nameES : svc.nameEN;
+    const now = new Date();
+
+    // TIME track
+    if (svc.dueDate) {
+      const dueDate = new Date(svc.dueDate);
+      const warnDate = new Date(dueDate);
+      warnDate.setDate(warnDate.getDate() - 14);
+
+      if (warnDate > now) {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: lang === 'EN' ? 'Service coming up' : 'Servicio próximo',
+            body: lang === 'EN'
+              ? `${vehicleLabel} — ${svcName} due in about 2 weeks`
+              : `${vehicleLabel} — ${svcName} vence en aproximadamente 2 semanas`,
+          },
+          trigger: { date: warnDate, channelId: NOTIFICATION_CHANNEL_ID },
+        });
+      }
+      if (dueDate > now) {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: lang === 'EN' ? 'Service due' : 'Servicio vencido',
+            body: lang === 'EN'
+              ? `${vehicleLabel} — ${svcName} is due today`
+              : `${vehicleLabel} — ${svcName} vence hoy`,
+          },
+          trigger: { date: dueDate, channelId: NOTIFICATION_CHANNEL_ID },
+        });
+      }
+    }
+
+    // MILEAGE track (projected)
+    if (svc.interval_miles_effective && avgMilesPerDay && vehicle.mileage) {
+      const targetMileage = svc.lastMileage + svc.interval_miles_effective;
+      const warnMileage = targetMileage - 500;
+      const currentMileage = Number(vehicle.mileage);
+
+      const warnDate = projectDateAtMileage(currentMileage, warnMileage, avgMilesPerDay);
+      const dueDateProjected = projectDateAtMileage(currentMileage, targetMileage, avgMilesPerDay);
+
+      if (warnDate && warnDate > now) {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: lang === 'EN' ? 'Service coming up (~500 mi)' : 'Servicio próximo (~500 mi)',
+            body: lang === 'EN'
+              ? `${vehicleLabel} — based on your driving, ${svcName} is coming up soon`
+              : `${vehicleLabel} — según tu manejo, ${svcName} se acerca pronto`,
+          },
+          trigger: { date: warnDate, channelId: NOTIFICATION_CHANNEL_ID },
+        });
+      }
+      if (dueDateProjected && dueDateProjected > now) {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: lang === 'EN' ? 'Service likely due' : 'Servicio probablemente vencido',
+            body: lang === 'EN'
+              ? `${vehicleLabel} — update your mileage in AutoCoach to confirm ${svcName} status`
+              : `${vehicleLabel} — actualiza tu kilometraje en AutoCoach para confirmar el estado de ${svcName}`,
+          },
+          trigger: { date: dueDateProjected, channelId: NOTIFICATION_CHANNEL_ID },
+        });
+      }
+    }
+  }
+
+  // Master rescheduler — cancels every previously scheduled reminder and
+  // builds a fresh set from current data. Called whenever the underlying
+  // data changes (new mileage, new fuel entry, interval setting changed,
+  // notifications toggled on) so stale reminders never linger and nothing
+  // gets double-scheduled. Already-overdue items are skipped here since
+  // they're already surfaced directly in the app itself.
+  async function rescheduleAllNotifications(overrideEnabled = null) {
+    const enabled = overrideEnabled !== null ? overrideEnabled : notificationsEnabled;
+    if (!enabled) {
+      await Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
+      return;
+    }
+    const granted = await requestNotificationPermissions();
+    if (!granted) return;
+
+    await Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
+
+    for (const vehicle of vehicles) {
+      const vKey = `${vehicle.year}_${vehicle.make}_${vehicle.model}`;
+      const schedule = getMaintenanceSchedule(vehicle.make, vehicle.model, vehicle.engine);
+      if (!schedule || !vehicle.mileage) continue;
+
+      const avgMilesPerDay = calculateAvgMilesPerDay(fuelLog, vKey);
+      const services = calculateDueServices(
+        schedule.services, Number(vehicle.mileage), serviceHistory[vKey] || {}, mileageInterval, intervalScale
+      );
+
+      for (const svc of services) {
+        if (svc.status === 'overdue') continue;
+        await scheduleServiceReminders(vehicle, svc, avgMilesPerDay);
+      }
+    }
   }
 
   // Calls the ocr.js Netlify function with a base64 photo and returns the
@@ -526,9 +722,26 @@ export default function App() {
     AsyncStorage.setItem('autocoach_interval_scale', String(clamped)).catch(() => {});
   }
 
-  function toggleNotifications(next) {
-    setNotificationsEnabled(next);
-    AsyncStorage.setItem('autocoach_notifications_enabled', String(next)).catch(() => {});
+  async function toggleNotifications(next) {
+    if (next) {
+      const granted = await requestNotificationPermissions();
+      setNotificationsEnabled(granted);
+      AsyncStorage.setItem('autocoach_notifications_enabled', String(granted)).catch(() => {});
+      if (!granted) {
+        Alert.alert(
+          '',
+          lang === 'EN'
+            ? 'Notifications were denied. You can enable them later from your phone settings.'
+            : 'Se denegaron las notificaciones. Puedes habilitarlas más tarde desde la configuración de tu teléfono.'
+        );
+        return;
+      }
+      rescheduleAllNotifications(granted);
+    } else {
+      setNotificationsEnabled(false);
+      AsyncStorage.setItem('autocoach_notifications_enabled', 'false').catch(() => {});
+      rescheduleAllNotifications(false);
+    }
   }
 
   async function requestLocationAccess() {
