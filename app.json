@@ -29,11 +29,22 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.SCHEDULE_EXACT_ALARM"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "maintenance-reminders"
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "b4572ca2-e8b8-4f89-89c0-3768de43c84f"
