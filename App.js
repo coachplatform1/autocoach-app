@@ -493,6 +493,13 @@ export default function App() {
   // toggle previously only flipped a local boolean without ever asking iOS
   // or Android for real permission, so no notification could ever have
   // fired regardless of the toggle's state.
+  //
+  // Two separate functions on purpose: requestNotificationPermissions()
+  // actively prompts the OS dialog and must ONLY ever be called from a
+  // deliberate user action (the Settings toggle). hasNotificationPermission()
+  // is a silent, read-only check used by automatic background rescheduling
+  // (app launch, data changes) — it never prompts, so opening the app or
+  // logging a fill-up can never itself trigger the permission dialog.
   async function requestNotificationPermissions() {
     try {
       const { status: existing } = await Notifications.getPermissionsAsync();
@@ -501,6 +508,16 @@ export default function App() {
       return status === 'granted';
     } catch (err) {
       console.error('Notification permission request failed:', err);
+      return false;
+    }
+  }
+
+  async function hasNotificationPermission() {
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      return status === 'granted';
+    } catch (err) {
+      console.error('Notification permission check failed:', err);
       return false;
     }
   }
@@ -603,7 +620,11 @@ export default function App() {
       await Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
       return;
     }
-    const granted = await requestNotificationPermissions();
+    // Silent check only — this runs automatically on app launch and on
+    // every data change, so it must never itself trigger the OS prompt.
+    // If permission hasn't been explicitly granted via the Settings
+    // toggle yet, just skip scheduling quietly rather than asking.
+    const granted = await hasNotificationPermission();
     if (!granted) return;
 
     await Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
