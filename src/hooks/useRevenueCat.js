@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Platform, Alert } from 'react-native';
 import Purchases from 'react-native-purchases';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const VEHICLE_LIMITS = {
   autocoach_solo: 1,
@@ -20,33 +19,23 @@ export function useRevenueCat(T = (key) => key) {
   const [purchasing, setPurchasing] = useState(false);
   const [restoring, setRestoring] = useState(false);
 
-  // Load cached Pro state immediately
-  useEffect(() => {
-    AsyncStorage.getItem('rc_is_pro').then(val => {
-      if (val === 'true') setIsPro(true);
-    }).catch(() => {});
-    
-    AsyncStorage.getItem('rc_vehicle_limit').then(val => {
-      if (val) setVehicleLimit(parseInt(val, 10));
-    }).catch(() => {});
+  // Deliberately no AsyncStorage pre-load here anymore. isPro, vehicleLimit,
+  // and activeProductIds are access-control values — they must only ever
+  // reflect real, current server data. A previous version pre-loaded a
+  // locally cached value on mount as a separate effect, running
+  // independently of (and unordered relative to) the fresh
+  // Purchases.getCustomerInfo() fetch in the effect below. Depending on
+  // timing, the stale cached value could resolve after the fresh one and
+  // silently overwrite it — e.g. showing a subscription as active (or a
+  // vehicle limit as granted) after it had actually expired in sandbox
+  // testing. The real fetch below already runs immediately on mount, so
+  // the brief moment before it resolves simply shows the safe defaults
+  // (not Pro, 0 vehicles) rather than risking incorrect stale access.
 
-    AsyncStorage.getItem('rc_active_product_ids').then(val => {
-      if (val) setActiveProductIds(JSON.parse(val));
-    }).catch(() => {});
-  }, []);
-
-  // Save state whenever it changes
-  useEffect(() => {
-    AsyncStorage.setItem('rc_is_pro', isPro ? 'true' : 'false').catch(() => {});
-  }, [isPro]);
-
-  useEffect(() => {
-    AsyncStorage.setItem('rc_vehicle_limit', vehicleLimit.toString()).catch(() => {});
-  }, [vehicleLimit]);
-
-  useEffect(() => {
-    AsyncStorage.setItem('rc_active_product_ids', JSON.stringify(activeProductIds)).catch(() => {});
-  }, [activeProductIds]);
+  // Note: isPro/vehicleLimit/activeProductIds are intentionally not
+  // persisted to AsyncStorage anymore — see the comment above. They live
+  // purely in memory for the current session and are correctly re-derived
+  // from a fresh server fetch every time the app launches.
 
   const updateStateFromCustomerInfo = (customerInfo) => {
     const entitlements = customerInfo?.entitlements?.active || {};
@@ -102,13 +91,30 @@ export function useRevenueCat(T = (key) => key) {
 
   const purchaseProduct = async (productId) => {
     if (activeProductIds.includes(productId)) {
-      return await new Promise((resolve) => {
-        Alert.alert(
-          T('alert_sub_title') || 'Already Subscribed',
-          T('alert_sub_body') || 'You already have this active subscription.',
-          [{ text: T('ok') || 'OK', onPress: () => setTimeout(() => resolve(true), 300) }]
-        );
-      });
+      // Don't trust the local cache alone — sandbox subscriptions expire
+      // on an accelerated schedule during testing, and a stale cached
+      // product ID here would incorrectly block a real repurchase and
+      // silently leave vehicleLimit at its old (likely 0) value, since
+      // this path previously never re-checked real server state.
+      let freshInfo;
+      try {
+        freshInfo = await Purchases.getCustomerInfo();
+      } catch (e) {
+        freshInfo = null;
+      }
+      const stillActive = freshInfo && updateStateFromCustomerInfo(freshInfo);
+      if (stillActive) {
+        return await new Promise((resolve) => {
+          Alert.alert(
+            T('alert_sub_title') || 'Already Subscribed',
+            T('alert_sub_body') || 'You already have this active subscription.',
+            [{ text: T('ok') || 'OK', onPress: () => setTimeout(() => resolve(true), 300) }]
+          );
+        });
+      }
+      // Not actually still active (expired in sandbox, etc.) — state has
+      // already been corrected by updateStateFromCustomerInfo above, so
+      // fall through and let the purchase proceed normally below.
     }
     
     if (!productId) return false;
