@@ -99,6 +99,11 @@ const OCR_ENDPOINT = 'https://coachplatform.app/.netlify/functions/ocr';
 // into the app binary — avoids needing a new native build just to update
 // branding, and stays in sync automatically if the website logo changes.
 const AUTOCOACH_LOGO_URL = 'https://coachplatform.app/assets/logo-autocoach-landscape.png';
+// Light-background variant (orange car/"Auto" + navy "C"/"Coach") for
+// contexts sitting on the app's light gray body background — the
+// dark-background variant above uses white for those same elements,
+// which washes out and disappears on a light background.
+const AUTOCOACH_LOGO_LIGHT_BG_URL = 'https://coachplatform.app/assets/logo-autocoach-landscape-lightbg.png';
 
 // Official NHTSA recalls-by-vehicle endpoint. Free, no API key required.
 // Docs: https://www.nhtsa.gov/nhtsa-datasets-and-apis
@@ -171,7 +176,16 @@ async function fetchRecalls(make, model, year) {
     // request hanging indefinitely rather than failing predictably.
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
-    const res = await fetch(url, { signal: controller.signal });
+    // React Native's fetch doesn't send a browser-style User-Agent by
+    // default, and NHTSA's Akamai firewall blocks requests without one —
+    // this was causing every request to fail with a 403 regardless of the
+    // URL or parameters being correct.
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+    });
     clearTimeout(timeoutId);
 
     if (!res.ok) {
@@ -405,6 +419,17 @@ export default function App() {
   const reviewCodeInputRef = useRef('');
   const [documents, setDocuments]             = useState([]);
   const [recallsCache, setRecallsCache]       = useState({}); // vKey -> array | null (undefined = not yet loaded)
+  // Synchronous guard against a remount loop: ScheduleScreen is a nested
+  // function inside App(), so any state update triggered by
+  // loadRecallsForVehicle causes App() to re-render, which recreates
+  // ScheduleScreen as a new function reference — React then treats it as
+  // a different component and remounts it, re-firing its useEffect before
+  // the first fetch has even resolved. A useState-based guard would reset
+  // on that same remount and not help; this ref lives on App() itself
+  // (which never remounts), so it correctly blocks duplicate in-flight
+  // fetches for the same vehicle regardless of how many times the nested
+  // screen gets recreated.
+  const recallsFetchingRef = useRef(new Set());
   const [recallsLoading, setRecallsLoading]   = useState({}); // vKey -> bool
 
   useEffect(() => {
@@ -520,10 +545,13 @@ export default function App() {
     if (!vehicle) return;
     const vKey = `${vehicle.year}_${vehicle.make}_${vehicle.model}`;
     if (recallsCache[vKey] !== undefined) return;
+    if (recallsFetchingRef.current.has(vKey)) return; // already in flight — blocks the remount loop
+    recallsFetchingRef.current.add(vKey);
     setRecallsLoading(prev => ({ ...prev, [vKey]: true }));
     const results = await fetchRecalls(vehicle.make, vehicle.model, vehicle.year);
     setRecallsCache(prev => ({ ...prev, [vKey]: results }));
     setRecallsLoading(prev => ({ ...prev, [vKey]: false }));
+    recallsFetchingRef.current.delete(vKey);
   }
 
   // Actually requests the OS-level notification permission — the Settings
@@ -1020,7 +1048,7 @@ export default function App() {
             </View>
 
             <View style={s.brandFooter}>
-              <Image source={{ uri: AUTOCOACH_LOGO_URL }} style={{ height: 32, width: 146, resizeMode: 'contain' }} />
+              <Image source={{ uri: AUTOCOACH_LOGO_LIGHT_BG_URL }} style={{ height: 32, width: 146, resizeMode: 'contain' }} />
               <Text style={s.brandFooterSub}>{lang === 'EN' ? 'Track it. Trust it.' : 'Rastréalo. Confía en él.'}</Text>
             </View>
           </>
@@ -1262,7 +1290,7 @@ export default function App() {
         </View>
 
         <View style={s.brandFooter}>
-          <Image source={{ uri: AUTOCOACH_LOGO_URL }} style={{ height: 32, width: 146, resizeMode: 'contain' }} />
+          <Image source={{ uri: AUTOCOACH_LOGO_LIGHT_BG_URL }} style={{ height: 32, width: 146, resizeMode: 'contain' }} />
           <Text style={s.brandFooterSub}>{lang === 'EN' ? 'Track it. Trust it.' : 'Rastréalo. Confía en él.'}</Text>
         </View>
       </ScrollView>
