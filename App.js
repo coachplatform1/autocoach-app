@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  StyleSheet, Text, View, TouchableOpacity,
+  StyleSheet, Text, View, TouchableOpacity, Image,
   Platform, ScrollView,
   TextInput, ActivityIndicator, Alert,
   KeyboardAvoidingView, Modal, FlatList, Share, Linking, Switch,
@@ -95,10 +95,17 @@ const REVIEWER_UNLOCK_CODE = 'AUTOCOACH-REVIEW-2026';
 // header comment for the four modes it supports.
 const OCR_ENDPOINT = 'https://coachplatform.app/.netlify/functions/ocr';
 
+// Real AutoCoach logo, loaded from the live website rather than bundled
+// into the app binary — avoids needing a new native build just to update
+// branding, and stays in sync automatically if the website logo changes.
+const AUTOCOACH_LOGO_URL = 'https://coachplatform.app/assets/logo-autocoach-landscape.png';
+
 // Official NHTSA recalls-by-vehicle endpoint. Free, no API key required.
 // Docs: https://www.nhtsa.gov/nhtsa-datasets-and-apis
 // Called directly from the app (no backend proxy needed — this is public
 // government data, unlike the OCR endpoint which hides an API key).
+const NHTSA_RECALLS_ENDPOINT = 'https://api.nhtsa.gov/recalls/recallsByVehicle';
+
 // Controls how a notification behaves if it fires while the app is
 // actually open in the foreground — still show it, since a maintenance
 // reminder is worth surfacing even if you're already in the app.
@@ -154,9 +161,25 @@ function projectDateAtMileage(currentMileage, targetMileage, avgMilesPerDay) {
 // from "checked, all clear."
 async function fetchRecalls(make, model, year) {
   try {
-    const url = `${NHTSA_RECALLS_ENDPOINT}?make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}&modelYear=${encodeURIComponent(year)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`NHTSA API returned ${res.status}`);
+    // NHTSA's own documented example uses lowercase values
+    // (make=ford&model=f-150) — lowercasing here in case their API is
+    // case-sensitive, since our vehicle database stores these capitalized
+    // ("Ford", "F-150") for display purposes.
+    const url = `${NHTSA_RECALLS_ENDPOINT}?make=${encodeURIComponent(String(make).toLowerCase())}&model=${encodeURIComponent(String(model).toLowerCase())}&modelYear=${encodeURIComponent(year)}`;
+
+    // Explicit timeout — without one, a slow/unresponsive API leaves the
+    // request hanging indefinitely rather than failing predictably.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      const bodyText = await res.text().catch(() => '');
+      console.error(`NHTSA recalls: HTTP ${res.status} for ${make}/${model}/${year} — ${bodyText.slice(0, 200)}`);
+      return null;
+    }
+
     const json = await res.json();
     const results = json.results || json.Results || [];
     return results.map(r => ({
@@ -169,7 +192,11 @@ async function fetchRecalls(make, model, year) {
       manufacturer:   r.Manufacturer || r.manufacturer || '',
     }));
   } catch (err) {
-    console.error('NHTSA recalls fetch failed:', err);
+    // Logs the REAL underlying error (timeout, malformed JSON, network
+    // failure, etc.) — check device/Metro console logs for this exact
+    // line to see what's actually happening, rather than the generic
+    // "check your connection" text shown to the user.
+    console.error(`NHTSA recalls fetch failed for ${make}/${model}/${year}:`, err.message || err);
     return null;
   }
 }
@@ -391,7 +418,17 @@ export default function App() {
     AsyncStorage.getItem('autocoach_units').then(s => { if (s) setUnits(s); });
     AsyncStorage.getItem('autocoach_mileage_interval').then(s => { if (s) setMileageInterval(parseInt(s, 10) || 1000); });
     AsyncStorage.getItem('autocoach_interval_scale').then(s => { if (s) setIntervalScale(Math.min(1.0, Math.max(0.5, parseFloat(s) || 1.0))); });
-    AsyncStorage.getItem('autocoach_notifications_enabled').then(s => { if (s !== null) setNotificationsEnabled(s === 'true'); });
+    // Notifications: the stored preference alone doesn't tell us the real
+    // state — on a fresh install there's no stored value yet, so the
+    // default (true) would show the toggle ON even though OS permission
+    // was never granted. The toggle should only ever show ON when BOTH
+    // the user's saved preference is true AND the OS permission is
+    // actually granted; otherwise nothing would fire regardless of what
+    // the switch displays. This same check re-runs whenever the Settings
+    // screen itself is viewed (see SettingsScreen below), so it also
+    // catches permission being changed in the OS settings while the app
+    // was backgrounded, not just the fresh-install case.
+    syncNotificationToggleState();
     AsyncStorage.getItem('autocoach_location_enabled').then(s => { if (s === 'true') setLocationEnabled(true); });
   }, []);
 
@@ -519,6 +556,26 @@ export default function App() {
     } catch (err) {
       console.error('Notification permission check failed:', err);
       return false;
+    }
+  }
+
+  // Reconciles the Settings toggle with reality: it should only ever show
+  // ON when the user's saved preference is true AND the OS permission is
+  // actually granted. On a fresh install there's no saved preference yet
+  // (defaults true), which previously left the toggle showing ON even
+  // though no permission had been granted — this corrects that, and also
+  // catches the case where permission was revoked in the OS settings
+  // while the app was backgrounded. If the corrected value differs from
+  // what was stored, storage is updated too, so the toggle stays accurate
+  // even after the app is fully closed and reopened.
+  async function syncNotificationToggleState() {
+    const storedRaw = await AsyncStorage.getItem('autocoach_notifications_enabled');
+    const storedPreference = storedRaw === null ? true : storedRaw === 'true';
+    const actuallyGranted = await hasNotificationPermission();
+    const effective = storedPreference && actuallyGranted;
+    setNotificationsEnabled(effective);
+    if (String(effective) !== storedRaw) {
+      AsyncStorage.setItem('autocoach_notifications_enabled', String(effective)).catch(() => {});
     }
   }
 
@@ -937,6 +994,37 @@ export default function App() {
             <Text style={s.addVehicleBtnSecondaryText}>+ {T('garage_add_vehicle')}</Text>
           </TouchableOpacity>
         )}
+
+        {vehicles.length > 0 && (
+          <>
+            <Text style={[s.serviceSectionTitle, { marginTop: 24 }]}>
+              {lang === 'EN' ? 'Quick Actions' : 'Acciones Rápidas'}
+            </Text>
+            <View style={s.quickActionsGrid}>
+              <TouchableOpacity style={s.quickActionCard} onPress={() => setActiveTab('shop')}>
+                <Text style={s.quickActionIcon}>🛒</Text>
+                <Text style={s.quickActionLabel}>{lang === 'EN' ? 'Shop Parts' : 'Comprar Piezas'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.quickActionCard} onPress={() => setActiveTab('fuel')}>
+                <Text style={s.quickActionIcon}>⛽</Text>
+                <Text style={s.quickActionLabel}>{lang === 'EN' ? 'Log Fuel' : 'Registrar Combustible'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.quickActionCard} onPress={() => setActiveTab('documents')}>
+                <Text style={s.quickActionIcon}>📁</Text>
+                <Text style={s.quickActionLabel}>{lang === 'EN' ? 'Documents' : 'Documentos'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.quickActionCard} onPress={() => setActiveTab('accidentChecklist')}>
+                <Text style={s.quickActionIcon}>🚨</Text>
+                <Text style={s.quickActionLabel}>{lang === 'EN' ? 'Accident Checklist' : 'Lista de Accidente'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={s.brandFooter}>
+              <Image source={{ uri: AUTOCOACH_LOGO_URL }} style={{ height: 32, width: 146, resizeMode: 'contain' }} />
+              <Text style={s.brandFooterSub}>{lang === 'EN' ? 'Track it. Trust it.' : 'Rastréalo. Confía en él.'}</Text>
+            </View>
+          </>
+        )}
       </ScrollView>
     );
   }
@@ -1174,8 +1262,7 @@ export default function App() {
         </View>
 
         <View style={s.brandFooter}>
-          <Text style={s.brandFooterIcon}>🚗</Text>
-          <Text style={s.brandFooterText}>AutoCoach</Text>
+          <Image source={{ uri: AUTOCOACH_LOGO_URL }} style={{ height: 32, width: 146, resizeMode: 'contain' }} />
           <Text style={s.brandFooterSub}>{lang === 'EN' ? 'Track it. Trust it.' : 'Rastréalo. Confía en él.'}</Text>
         </View>
       </ScrollView>
@@ -1853,6 +1940,15 @@ export default function App() {
         <Text style={s.screenTitle}>{T('shop_title')}</Text>
         <Text style={s.shopSubtitle}>{T('shop_subtitle')}</Text>
 
+        <TouchableOpacity style={s.shopAllPartsBig} onPress={() => openAffiliateLink('ADVANCE_AUTO')}>
+          <Text style={s.shopAllPartsBigIcon}>🔎</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={s.shopAllPartsBigTitle}>{T('shop_all_parts')}</Text>
+            <Text style={s.shopAllPartsBigSub}>{lang === 'EN' ? 'Search everything, exact fit for your vehicle' : 'Busca todo, ajuste exacto para tu vehículo'}</Text>
+          </View>
+          <Text style={[s.shopAllPartsArrow, { color: COLORS.white }]}>›</Text>
+        </TouchableOpacity>
+
         {vehicles.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.vehicleChipRow}>
             {vehicles.map((v, i) => (
@@ -1934,13 +2030,6 @@ export default function App() {
             </TouchableOpacity>
           </View>
         </View>
-
-        {/* All parts catch-all */}
-        <TouchableOpacity style={s.shopAllPartsRow} onPress={() => openAffiliateLink('ADVANCE_AUTO')}>
-          <Text style={s.shopAllPartsText}>🔎 {T('shop_all_parts')}</Text>
-          <Text style={s.shopAllPartsArrow}>›</Text>
-        </TouchableOpacity>
-
         {/* Local car wash deals */}
         <TouchableOpacity style={s.carWashBanner} onPress={() => openAffiliateLink('UPSIDE')}>
           <Text style={s.carWashTitle}>🚿 {T('shop_car_wash_title')}</Text>
@@ -2143,6 +2232,14 @@ export default function App() {
   // SETTINGS SCREEN
   // ─────────────────────────────────────────────
   function SettingsScreen() {
+    // Re-syncs the toggle every time Settings is actually viewed, not just
+    // on cold app launch — catches the case where someone backgrounds the
+    // app, changes notification permission in the OS settings, then comes
+    // back to this screen without a full app restart.
+    useEffect(() => {
+      syncNotificationToggleState();
+    }, []);
+
     const tierLabels = {
       autocoach_solo: T('calc_name_solo'), autocoach_duo: T('calc_name_duo'),
       autocoach_family: T('calc_name_family'), autocoach_family_plus: T('calc_name_family_plus'),
@@ -2630,7 +2727,7 @@ export default function App() {
       <StatusBar style="light" backgroundColor={COLORS.primary} />
       <View style={s.header}>
         <View>
-          <Text style={s.headerTitle}>{T('appName')}</Text>
+          <Image source={{ uri: AUTOCOACH_LOGO_URL }} style={{ height: 28, width: 128, resizeMode: 'contain' }} />
           <Text style={s.headerSub}>{vehicles.length} {T('garage_stat_vehicles')}</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -2802,6 +2899,16 @@ const s = StyleSheet.create({
   shopDueBadgeText:  { fontSize: 11, color: COLORS.overdueText, fontWeight: '500' },
 
   shopAllPartsRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: COLORS.cardBg, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.border, paddingHorizontal: 16, paddingVertical: 15, marginBottom: 14 },
+  shopAllPartsBig: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: COLORS.accent, borderRadius: 16,
+    paddingHorizontal: 20, paddingVertical: 20, marginBottom: 20,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 10,
+    elevation: 4,
+  },
+  shopAllPartsBigIcon:  { fontSize: 30 },
+  shopAllPartsBigTitle: { fontSize: 17, fontWeight: '700', color: COLORS.white, marginBottom: 2 },
+  shopAllPartsBigSub:   { fontSize: 12.5, color: 'rgba(255,255,255,0.85)' },
   shopAllPartsText:  { fontSize: 14, fontWeight: '500', color: COLORS.textNavy },
   shopAllPartsArrow: { fontSize: 20, color: COLORS.textMuted },
 
