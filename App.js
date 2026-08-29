@@ -2110,7 +2110,7 @@ export default function App() {
           </TouchableOpacity>
           <Text style={s.paywallFooterDot}>·</Text>
           <TouchableOpacity onPress={() => Linking.openURL('https://coachplatform.app/terms.html')} hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}>
-            <Text style={[s.paywallFooterLink, { textAlign: 'center' }]}>{T('paywall_terms')}</Text>
+            <Text style={[s.paywallFooterLink, { textAlign: 'center' }]}>{T('settings_terms')}</Text>
           </TouchableOpacity>
           <Text style={s.paywallFooterDot}>·</Text>
           <TouchableOpacity onPress={() => Linking.openURL('https://coachplatform.app/privacy.html')} hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}>
@@ -2118,6 +2118,7 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
+        <Text style={[s.paywallNoFreeTier, { marginBottom: 4 }]}>{T('paywall_terms')}</Text>
         <Text style={s.paywallNoFreeTier}>{T('paywall_no_free_tier')}</Text>
       </ScrollView>
     );
