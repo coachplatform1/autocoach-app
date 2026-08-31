@@ -1048,7 +1048,7 @@ export default function App() {
             </View>
 
             <View style={s.brandFooter}>
-              <Image source={{ uri: AUTOCOACH_LOGO_LIGHT_BG_URL }} style={{ height: 32, width: 146, resizeMode: 'contain' }} />
+              <Image source={{ uri: AUTOCOACH_LOGO_LIGHT_BG_URL }} style={{ height: 46, width: 210, resizeMode: 'contain' }} />
               <Text style={s.brandFooterSub}>{lang === 'EN' ? 'Track it. Trust it.' : 'Rastréalo. Confía en él.'}</Text>
             </View>
           </>
@@ -1290,7 +1290,7 @@ export default function App() {
         </View>
 
         <View style={s.brandFooter}>
-          <Image source={{ uri: AUTOCOACH_LOGO_LIGHT_BG_URL }} style={{ height: 32, width: 146, resizeMode: 'contain' }} />
+          <Image source={{ uri: AUTOCOACH_LOGO_LIGHT_BG_URL }} style={{ height: 46, width: 210, resizeMode: 'contain' }} />
           <Text style={s.brandFooterSub}>{lang === 'EN' ? 'Track it. Trust it.' : 'Rastréalo. Confía en él.'}</Text>
         </View>
       </ScrollView>
@@ -2756,7 +2756,7 @@ export default function App() {
       <StatusBar style="light" backgroundColor={COLORS.primary} />
       <View style={s.header}>
         <View>
-          <Image source={{ uri: AUTOCOACH_LOGO_URL }} style={{ height: 28, width: 128, resizeMode: 'contain' }} />
+          <Image source={{ uri: AUTOCOACH_LOGO_URL }} style={{ height: 38, width: 174, resizeMode: 'contain' }} />
           <Text style={s.headerSub}>{vehicles.length} {T('garage_stat_vehicles')}</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
