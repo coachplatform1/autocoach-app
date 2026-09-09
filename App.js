@@ -1489,6 +1489,60 @@ export default function App() {
           )}
         </View>
 
+        {/* ── Buy parts for this service ── */}
+        {(() => {
+          const map = SERVICE_SHOP_MAP[svc.id] || DEFAULT_SHOP_ENTRY;
+          const AFFILIATE_NAMES = {
+            ADVANCE_AUTO: 'Advance Auto Parts', AUTOZONE: 'AutoZone', AMAZON: 'Amazon',
+            TIRE_RACK: 'Tire Rack', SIMPLE_TIRE: 'SimpleTire', MAVIS: 'Mavis Tires',
+            AUTONATION: 'AutoNation Parts', FINDITPARTS: 'FindItParts', BATTERY_TENDER: 'Battery Tender',
+            SAFELITE: 'Safelite', CHEMICAL_GUYS: 'Chemical Guys', EASTWOOD: 'Eastwood',
+          };
+          return (
+            <View style={s.card}>
+              <Text style={s.sectionLabel}>{lang === 'EN' ? 'Buy parts for this service' : 'Comprar piezas para este servicio'}</Text>
+
+              {/* Show what's needed — spec + quantity from the service itself */}
+              {(svc.spec || svc.qty) && (
+                <View style={{ backgroundColor: COLORS.bodyBg, borderRadius: 8, padding: 10, marginBottom: 12 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textNavy, marginBottom: 2 }}>
+                    {name} — {activeVehicle.year} {activeVehicle.make} {activeVehicle.model}
+                  </Text>
+                  {svc.spec && <Text style={{ fontSize: 12, color: COLORS.accent }}>{svc.spec}</Text>}
+                  {svc.qty && <Text style={{ fontSize: 12, color: COLORS.accent }}>{svc.qty}</Text>}
+                </View>
+              )}
+
+              {/* Primary buy button */}
+              <TouchableOpacity style={s.shopBuyBtn} onPress={() => openAffiliateLink(map.primary)}>
+                <Text style={s.shopBuyBtnText}>
+                  {lang === 'EN' ? 'Buy' : 'Comprar'} — {AFFILIATE_NAMES[map.primary] || map.primary}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Alternate links */}
+              {map.alternates && map.alternates.length > 0 && (
+                <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 8 }}>
+                  {map.alternates.map((key, i) => (
+                    <TouchableOpacity key={i} onPress={() => openAffiliateLink(key)}>
+                      <Text style={{ fontSize: 13, color: COLORS.accent, fontWeight: '500' }}>
+                        {lang === 'EN' ? 'View' : 'Ver'} — {AFFILIATE_NAMES[key] || key}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              {/* Commission disclaimer — same language as PoolCoach */}
+              <Text style={{ fontSize: 10, color: COLORS.textMuted, textAlign: 'center', marginTop: 12, lineHeight: 14 }}>
+                {lang === 'EN'
+                  ? 'AutoCoach earns a small commission on purchases. This never affects which parts we recommend — only parts that fit your vehicle are shown.'
+                  : 'AutoCoach recibe una pequeña comisión por las compras. Esto nunca afecta las piezas que recomendamos — solo se muestran piezas compatibles con tu vehículo.'}
+              </Text>
+            </View>
+          );
+        })()}
+
         {svc.notes && (
           <View style={[s.card, { backgroundColor: COLORS.recallBg, borderColor: COLORS.recallBorder }]}>
             <Text style={{ fontSize: 13, color: COLORS.accentDark, lineHeight: 18 }}>⚠ {svc.notes}</Text>
