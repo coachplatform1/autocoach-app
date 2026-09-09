@@ -1343,7 +1343,7 @@ export default function App() {
     }
 
     return (
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior='padding' keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
       <ScrollView style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
         <TouchableOpacity style={s.backBtn} onPress={() => setActiveTab('schedule')}>
           <Text style={s.backBtnText}>← {T('btn_back')}</Text>
@@ -1850,7 +1850,7 @@ export default function App() {
     }
 
     return (
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior='padding' keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
       <ScrollView style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
         {vehicles.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.vehicleChipRow}>
@@ -2351,7 +2351,7 @@ export default function App() {
     }
 
     return (
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior='padding' keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
         <ScrollView style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
           <TouchableOpacity style={s.backBtn} onPress={() => setActiveTab('garage')}>
             <Text style={s.backBtnText}>← {T('btn_back')}</Text>
@@ -2908,9 +2908,9 @@ export default function App() {
       <StatusBar style="light" backgroundColor={COLORS.primary} />
       <View style={s.header}>
         <View>
-          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+          <View style={{ position: 'relative' }}>
             <Image source={{ uri: AUTOCOACH_LOGO_URL }} style={{ height: 38, width: 174, resizeMode: 'contain' }} />
-            <Text style={{ color: COLORS.white, fontSize: 11, marginLeft: 2, marginTop: 2 }}>™</Text>
+            <Text style={{ color: COLORS.white, fontSize: 9, position: 'absolute', right: -2, top: 1 }}>™</Text>
           </View>
           <Text style={s.headerSub}>{vehicles.length} {T('garage_stat_vehicles')}</Text>
         </View>
