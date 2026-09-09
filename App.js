@@ -1232,6 +1232,11 @@ export default function App() {
             <Text style={[s.serviceSectionTitle, { color: COLORS.overdueText }]}>
               🚨 {lang === 'EN' ? 'Open Safety Recalls' : 'Retiros de Seguridad Abiertos'} ({recalls.length})
             </Text>
+            {lang === 'ES' && (
+              <Text style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 10, fontStyle: 'italic' }}>
+                Los detalles de los retiros provienen directamente de la NHTSA (agencia del gobierno de EE. UU.) y solo están disponibles en inglés.
+              </Text>
+            )}
             {recalls.map((r, i) => <RecallCard key={i} recall={r} />)}
           </View>
         )}
@@ -1338,7 +1343,8 @@ export default function App() {
     }
 
     return (
-      <ScrollView style={s.screen} contentContainerStyle={s.screenContent}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <ScrollView style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
         <TouchableOpacity style={s.backBtn} onPress={() => setActiveTab('schedule')}>
           <Text style={s.backBtnText}>← {T('btn_back')}</Text>
         </TouchableOpacity>
@@ -1405,6 +1411,7 @@ export default function App() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -1643,6 +1650,50 @@ export default function App() {
     const [showReceiptCamera, setShowReceiptCamera] = useState(false);
     const [receiptScanning, setReceiptScanning]     = useState(false);
     const [scannedDateTime, setScannedDateTime]     = useState(null);
+    const [manualDate, setManualDate]                = useState(null); // user override, takes priority over scan or "now"
+    const [editingIndex, setEditingIndex]            = useState(null); // real index into fuelLog when editing an existing entry, null when adding new
+    const [showDatePicker, setShowDatePicker]        = useState(false);
+    const [pickerMonth, setPickerMonth]   = useState('');
+    const [pickerDay, setPickerDay]       = useState('');
+    const [pickerYear, setPickerYear]     = useState('');
+    const [pickerHour, setPickerHour]     = useState('');
+    const [pickerMinute, setPickerMinute] = useState('');
+    const [pickerAmPm, setPickerAmPm]     = useState('');
+
+    const MONTH_NAMES = lang === 'EN'
+      ? ['January','February','March','April','May','June','July','August','September','October','November','December']
+      : ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+    function openDatePicker() {
+      const base = manualDate || scannedDateTime || new Date();
+      const h24 = base.getHours();
+      setPickerMonth(MONTH_NAMES[base.getMonth()]);
+      setPickerDay(String(base.getDate()));
+      setPickerYear(String(base.getFullYear()));
+      setPickerHour(String(h24 % 12 === 0 ? 12 : h24 % 12));
+      setPickerMinute(String(base.getMinutes()).padStart(2, '0'));
+      setPickerAmPm(h24 >= 12 ? 'PM' : 'AM');
+      setShowDatePicker(true);
+    }
+
+    function confirmDatePicker() {
+      const monthIdx = MONTH_NAMES.indexOf(pickerMonth);
+      let hour24 = parseInt(pickerHour, 10) % 12;
+      if (pickerAmPm === 'PM') hour24 += 12;
+      const picked = new Date(
+        parseInt(pickerYear, 10),
+        monthIdx,
+        parseInt(pickerDay, 10),
+        hour24,
+        parseInt(pickerMinute, 10)
+      );
+      // Picking a manual date/time means this entry is no longer tied to
+      // whatever the receipt scan said, if it came from a scan — the
+      // user's explicit choice always wins from this point on.
+      setScannedDateTime(null);
+      setManualDate(picked);
+      setShowDatePicker(false);
+    }
 
     const activeVehicleKey = activeVehicle
       ? `${activeVehicle.year}_${activeVehicle.make}_${activeVehicle.model}`
@@ -1675,9 +1726,11 @@ export default function App() {
       const price = parseFloat(pricePerGal) || 0;
       const total = price > 0 ? gals * price : 0;
 
-      // Use the receipt's own date/time if this entry came from a scan;
-      // otherwise stamp it with the current date/time as usual.
-      const effectiveDate = scannedDateTime || new Date();
+      // Priority: manual override (user explicitly picked a date/time) >
+      // receipt scan's own date/time > right now. This lets someone log a
+      // fill-up after the fact with the real date it happened, not just
+      // whenever they got around to entering it.
+      const effectiveDate = manualDate || scannedDateTime || new Date();
 
       const entry = {
         vehicleKey:    activeVehicleKey,
@@ -1691,18 +1744,40 @@ export default function App() {
         odometerPhoto: odometerPhoto || null,
       };
 
-      const updated = [entry, ...fuelLog];
+      let updated;
+      if (editingIndex !== null) {
+        // Editing an existing entry — replace it in place rather than
+        // prepending a new one, so its position in history stays logical.
+        updated = [...fuelLog];
+        updated[editingIndex] = entry;
+      } else {
+        updated = [entry, ...fuelLog];
+      }
       setFuelLog(updated);
       AsyncStorage.setItem('autocoach_fuel_log', JSON.stringify(updated));
       setMileage(''); setGallons(''); setPricePerGal('');
-      setOdometerPhoto(null); setShowAddForm(false); setScannedDateTime(null);
+      setOdometerPhoto(null); setShowAddForm(false); setScannedDateTime(null); setManualDate(null); setEditingIndex(null);
 
       Alert.alert(
-        lang === 'EN' ? 'Fuel stop logged ✓' : 'Parada registrada ✓',
+        editingIndex !== null
+          ? (lang === 'EN' ? 'Fuel stop updated ✓' : 'Parada actualizada ✓')
+          : (lang === 'EN' ? 'Fuel stop logged ✓' : 'Parada registrada ✓'),
         lang === 'EN'
           ? `${gals} gal at ${miles.toLocaleString()} mi${price ? ` — $${total.toFixed(2)}` : ''}`
           : `${gals} gal a ${miles.toLocaleString()} mi${price ? ` — $${total.toFixed(2)}` : ''}`
       );
+    }
+
+    function openEditFuelEntry(entry) {
+      const realIndex = fuelLog.indexOf(entry);
+      if (realIndex === -1) return;
+      setEditingIndex(realIndex);
+      setMileage(String(entry.mileage));
+      setGallons(String(entry.gallons));
+      setPricePerGal(entry.pricePerGal ? String(entry.pricePerGal) : '');
+      setManualDate(new Date(entry.date));
+      setScannedDateTime(null);
+      setShowAddForm(true);
     }
 
     // Parses OCR's "YYYY-MM-DD" + "HH:MM" (24hr) into a real Date object.
@@ -1775,7 +1850,8 @@ export default function App() {
     }
 
     return (
-      <ScrollView style={s.screen} contentContainerStyle={s.screenContent}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <ScrollView style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
         {vehicles.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.vehicleChipRow}>
             {vehicles.map((v, i) => (
@@ -1807,7 +1883,20 @@ export default function App() {
           </View>
         </View>
 
-        <TouchableOpacity style={s.addVehicleBtn} onPress={() => { setShowAddForm(!showAddForm); setScannedDateTime(null); }}>
+        <TouchableOpacity
+          style={s.addVehicleBtn}
+          onPress={() => {
+            const closing = showAddForm;
+            setShowAddForm(!showAddForm);
+            setScannedDateTime(null);
+            setEditingIndex(null);
+            if (!closing) {
+              // Opening fresh (not via edit tap) — make sure no stale
+              // values from a previous edit linger in the form.
+              setMileage(''); setGallons(''); setPricePerGal(''); setManualDate(null);
+            }
+          }}
+        >
           <Text style={s.addVehicleBtnText}>
             {showAddForm
               ? (lang === 'EN' ? '✕ Cancel' : '✕ Cancelar')
@@ -1822,7 +1911,25 @@ export default function App() {
 
         {showAddForm && (
           <View style={[s.card, { marginTop: 12 }]}>
-            <Text style={s.sectionLabel}>{lang === 'EN' ? 'New fuel stop' : 'Nueva parada'}</Text>
+            <Text style={s.sectionLabel}>
+              {editingIndex !== null
+                ? (lang === 'EN' ? 'Edit fuel stop' : 'Editar parada')
+                : (lang === 'EN' ? 'New fuel stop' : 'Nueva parada')}
+            </Text>
+
+            <Text style={s.fieldLabel}>{lang === 'EN' ? 'Date & time' : 'Fecha y hora'}</Text>
+            <TouchableOpacity style={s.input} onPress={openDatePicker}>
+              <Text style={{ fontSize: 15, color: COLORS.textPrimary }}>
+                {(manualDate || scannedDateTime || new Date()).toLocaleString()}
+              </Text>
+            </TouchableOpacity>
+            {manualDate && (
+              <TouchableOpacity onPress={() => setManualDate(null)}>
+                <Text style={{ color: COLORS.accentDark, fontSize: 12, fontWeight: '600', marginTop: 4 }}>
+                  {lang === 'EN' ? 'Reset to now' : 'Restablecer a ahora'}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {scannedDateTime && (
               <View style={[s.vinVerifiedBadge, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
@@ -1859,10 +1966,51 @@ export default function App() {
             <Text style={s.fieldLabel}>{lang === 'EN' ? 'Price per gallon (optional)' : 'Precio por galón (opcional)'}</Text>
             <TextInput style={s.input} value={pricePerGal} onChangeText={setPricePerGal} placeholder="$3.89" placeholderTextColor={COLORS.textMuted} keyboardType="decimal-pad" />
             <TouchableOpacity style={s.primaryBtn} onPress={handleAddFuelStop}>
-              <Text style={s.primaryBtnText}>{lang === 'EN' ? 'Log fuel stop' : 'Registrar parada'}</Text>
+              <Text style={s.primaryBtnText}>
+                {editingIndex !== null
+                  ? (lang === 'EN' ? 'Save changes' : 'Guardar cambios')
+                  : (lang === 'EN' ? 'Log fuel stop' : 'Registrar parada')}
+              </Text>
             </TouchableOpacity>
           </View>
         )}
+
+        <Modal visible={showDatePicker} transparent animationType="slide" onRequestClose={() => setShowDatePicker(false)}>
+          <TouchableOpacity style={sp.backdrop} activeOpacity={1} onPress={() => setShowDatePicker(false)} />
+          <View style={sp.sheet}>
+            <View style={sp.sheetHeader}>
+              <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                <Text style={{ fontSize: 15, color: COLORS.textMuted }}>{lang === 'EN' ? 'Cancel' : 'Cancelar'}</Text>
+              </TouchableOpacity>
+              <Text style={sp.sheetTitle}>{lang === 'EN' ? 'Date & Time' : 'Fecha y Hora'}</Text>
+              <TouchableOpacity onPress={confirmDatePicker}>
+                <Text style={sp.sheetDone}>{lang === 'EN' ? 'Done' : 'Listo'}</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ flexDirection: 'row', paddingHorizontal: 12, paddingTop: 8 }}>
+              <View style={{ flex: 2 }}>
+                <ScrollPicker items={MONTH_NAMES} selectedValue={pickerMonth} onSelect={setPickerMonth} label={lang === 'EN' ? 'Month' : 'Mes'} placeholder="" lang={lang} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <ScrollPicker items={Array.from({length: 31}, (_, i) => String(i + 1))} selectedValue={pickerDay} onSelect={setPickerDay} label={lang === 'EN' ? 'Day' : 'Día'} placeholder="" lang={lang} />
+              </View>
+              <View style={{ flex: 1.3 }}>
+                <ScrollPicker items={Array.from({length: 5}, (_, i) => String(new Date().getFullYear() - 4 + i))} selectedValue={pickerYear} onSelect={setPickerYear} label={lang === 'EN' ? 'Year' : 'Año'} placeholder="" lang={lang} />
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', paddingHorizontal: 12 }}>
+              <View style={{ flex: 1 }}>
+                <ScrollPicker items={Array.from({length: 12}, (_, i) => String(i + 1))} selectedValue={pickerHour} onSelect={setPickerHour} label={lang === 'EN' ? 'Hour' : 'Hora'} placeholder="" lang={lang} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <ScrollPicker items={Array.from({length: 60}, (_, i) => String(i).padStart(2, '0'))} selectedValue={pickerMinute} onSelect={setPickerMinute} label={lang === 'EN' ? 'Minute' : 'Minuto'} placeholder="" lang={lang} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <ScrollPicker items={['AM', 'PM']} selectedValue={pickerAmPm} onSelect={setPickerAmPm} label="AM/PM" placeholder="" lang={lang} />
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         {vehicleFuelLog.length === 0 ? (
           <View style={[s.emptyWrap, { paddingVertical: 40 }]}>
@@ -1880,7 +2028,7 @@ export default function App() {
                   ? ((entry.mileage - vehicleFuelLog[i + 1].mileage) / entry.gallons).toFixed(1)
                   : null;
                 return (
-                  <View key={i} style={s.serviceRow}>
+                  <TouchableOpacity key={i} style={s.serviceRow} onPress={() => openEditFuelEntry(entry)} activeOpacity={0.7}>
                     <View style={{ flex: 1 }}>
                       <Text style={s.serviceName}>{entry.mileage.toLocaleString()} mi — {entry.gallons} {lang === 'EN' ? 'gal' : 'gal'}</Text>
                       <Text style={s.serviceDue}>
@@ -1890,7 +2038,7 @@ export default function App() {
                       </Text>
                     </View>
                     {entry.pricePerGal > 0 && <Text style={s.serviceSpec}>${entry.pricePerGal.toFixed(2)}/gal</Text>}
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
             </View>
@@ -1903,6 +2051,7 @@ export default function App() {
           <Text style={s.upsideBannerCta}>{lang === 'EN' ? 'Learn more →' : 'Más información →'}</Text>
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -2432,6 +2581,9 @@ export default function App() {
           <SettingsRow label={T('settings_sign_out')} onPress={handleResetApp} showArrow={false} />
         </View>
 
+        <Text style={{ textAlign: 'center', fontSize: 12, color: COLORS.textMuted, marginTop: 20 }}>
+          AutoCoach™
+        </Text>
         <Text style={s.settingsVersion} onLongPress={() => setShowReviewModal(true)} delayLongPress={800}>
           {T('settings_version')} 1.0.0 (dev)
         </Text>
@@ -2756,7 +2908,10 @@ export default function App() {
       <StatusBar style="light" backgroundColor={COLORS.primary} />
       <View style={s.header}>
         <View>
-          <Image source={{ uri: AUTOCOACH_LOGO_URL }} style={{ height: 38, width: 174, resizeMode: 'contain' }} />
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+            <Image source={{ uri: AUTOCOACH_LOGO_URL }} style={{ height: 38, width: 174, resizeMode: 'contain' }} />
+            <Text style={{ color: COLORS.white, fontSize: 11, marginLeft: 2, marginTop: 2 }}>™</Text>
+          </View>
           <Text style={s.headerSub}>{vehicles.length} {T('garage_stat_vehicles')}</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -2984,7 +3139,7 @@ const s = StyleSheet.create({
   quickActionIcon:   { fontSize: 30, marginBottom: 8 },
   quickActionLabel:  { fontSize: 13, fontWeight: '600', color: COLORS.textNavy, textAlign: 'center' },
 
-  brandFooter:       { alignItems: 'center', paddingVertical: 28, opacity: 0.45 },
+  brandFooter:       { alignItems: 'center', paddingVertical: 28, opacity: 0.9 },
   brandFooterIcon:   { fontSize: 32, marginBottom: 6 },
   brandFooterText:   { fontSize: 16, fontWeight: '700', color: COLORS.primary, letterSpacing: 1 },
   brandFooterSub:    { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },

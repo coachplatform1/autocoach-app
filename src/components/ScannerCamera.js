@@ -7,6 +7,7 @@ import { SOW_TRANSLATIONS } from '../translations/SowTranslations';
 export default function ScannerCamera({ onPhotoTaken, onClose, lang = 'EN' }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [zoom, setZoom] = useState(0); // expo-camera zoom range is 0 (wide) to 1 (max zoom)
   const cameraRef = useRef(null);
 
   if (!permission) {
@@ -55,7 +56,7 @@ export default function ScannerCamera({ onPhotoTaken, onClose, lang = 'EN' }) {
 
   return (
     <View style={styles.container}>
-      <CameraView style={styles.camera} ref={cameraRef} facing="back">
+      <CameraView style={styles.camera} ref={cameraRef} facing="back" zoom={zoom}>
         <SafeAreaView style={styles.overlay}>
           {/* Header row with close button */}
           <View style={styles.header}>
@@ -63,8 +64,27 @@ export default function ScannerCamera({ onPhotoTaken, onClose, lang = 'EN' }) {
               <Text style={styles.closeIconText}>✕</Text>
             </TouchableOpacity>
           </View>
-          
+
           <View style={styles.spacer} />
+
+          {/* Zoom controls — simple +/- rather than pinch gesture, since a
+              pinch handler would need react-native-gesture-handler and we
+              can't confirm that's already a dependency in this project. */}
+          <View style={styles.zoomRow}>
+            <TouchableOpacity
+              style={styles.zoomBtn}
+              onPress={() => setZoom(z => Math.max(0, z - 0.1))}
+            >
+              <Text style={styles.zoomBtnText}>−</Text>
+            </TouchableOpacity>
+            <Text style={styles.zoomLabel}>{Math.round(zoom * 10) + 1}x</Text>
+            <TouchableOpacity
+              style={styles.zoomBtn}
+              onPress={() => setZoom(z => Math.min(1, z + 0.1))}
+            >
+              <Text style={styles.zoomBtnText}>+</Text>
+            </TouchableOpacity>
+          </View>
 
           {/* Bottom row with shutter button */}
           <View style={styles.footer}>
@@ -113,6 +133,33 @@ const styles = StyleSheet.create({
   },
   spacer: {
     flex: 1,
+  },
+  zoomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 20,
+    marginBottom: 20,
+  },
+  zoomBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomBtnText: {
+    color: '#FFF',
+    fontSize: 24,
+    fontWeight: '600',
+  },
+  zoomLabel: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '600',
+    minWidth: 36,
+    textAlign: 'center',
   },
   footer: {
     paddingBottom: 40,
