@@ -419,6 +419,7 @@ export default function App() {
   const reviewCodeInputRef = useRef('');
   const [documents, setDocuments]             = useState([]);
   const [recallsCache, setRecallsCache]       = useState({}); // vKey -> array | null (undefined = not yet loaded)
+  const [completedRecalls, setCompletedRecalls] = useState({}); // { 'vKey_campaignNumber': { completedDate, campaignNumber } }
   // Synchronous guard against a remount loop: ScheduleScreen is a nested
   // function inside App(), so any state update triggered by
   // loadRecallsForVehicle causes App() to re-render, which recreates
@@ -437,6 +438,7 @@ export default function App() {
     AsyncStorage.getItem('autocoach_vehicles').then(s => { if (s) setVehicles(JSON.parse(s)); });
     AsyncStorage.getItem('autocoach_service_history').then(s => { if (s) setServiceHistory(JSON.parse(s)); });
     AsyncStorage.getItem('autocoach_fuel_log').then(s => { if (s) setFuelLog(JSON.parse(s)); });
+    AsyncStorage.getItem('autocoach_completed_recalls').then(s => { if (s) setCompletedRecalls(JSON.parse(s)); });
     AsyncStorage.getItem('autocoach_documents').then(s => { if (s) setDocuments(JSON.parse(s)); });
     AsyncStorage.getItem('autocoach_subscribed_tier').then(s => { if (s) setCurrentTier(s); });
     // Settings preferences
@@ -541,6 +543,28 @@ export default function App() {
   // Cached per vehicle (year+make+model) so switching between vehicle
   // chips doesn't re-hit NHTSA's API every time — only fetches once per
   // vehicle per app session.
+  function markRecallCompleted(vKey, campaignNumber) {
+    const key = `${vKey}_${campaignNumber}`;
+    const updated = {
+      ...completedRecalls,
+      [key]: { completedDate: new Date().toISOString(), campaignNumber }
+    };
+    setCompletedRecalls(updated);
+    AsyncStorage.setItem('autocoach_completed_recalls', JSON.stringify(updated));
+  }
+
+  function undoRecallCompleted(vKey, campaignNumber) {
+    const key = `${vKey}_${campaignNumber}`;
+    const updated = { ...completedRecalls };
+    delete updated[key];
+    setCompletedRecalls(updated);
+    AsyncStorage.setItem('autocoach_completed_recalls', JSON.stringify(updated));
+  }
+
+  function isRecallCompleted(vKey, campaignNumber) {
+    return !!completedRecalls[`${vKey}_${campaignNumber}`];
+  }
+
   async function loadRecallsForVehicle(vehicle) {
     if (!vehicle) return;
     const vKey = `${vehicle.year}_${vehicle.make}_${vehicle.model}`;
@@ -1124,17 +1148,29 @@ export default function App() {
       );
     }
 
-    function RecallCard({ recall }) {
+    function RecallCard({ recall, vKey }) {
       const [expanded, setExpanded] = useState(false);
+      const completed = isRecallCompleted(vKey, recall.campaignNumber);
       const summary = recall.summary || '';
       const truncated = summary.length > 110 ? summary.slice(0, 110) + '…' : summary;
       return (
         <TouchableOpacity
-          style={[s.card, { borderColor: COLORS.overdueText, borderWidth: 1 }]}
+          style={[s.card, {
+            borderColor: completed ? COLORS.okText : COLORS.overdueText,
+            borderWidth: 1,
+            opacity: completed ? 0.7 : 1,
+          }]}
           onPress={() => setExpanded(!expanded)}
           activeOpacity={0.8}
         >
-          <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.overdueText, marginBottom: 4 }}>
+          {completed && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.okText }}>
+                ✓ {lang === 'EN' ? 'Completed' : 'Completado'}
+              </Text>
+            </View>
+          )}
+          <Text style={{ fontSize: 14, fontWeight: '700', color: completed ? COLORS.okText : COLORS.overdueText, marginBottom: 4 }}>
             {recall.component || (lang === 'EN' ? 'Recall' : 'Retiro')}
           </Text>
           <Text style={{ fontSize: 12, color: COLORS.textMuted, lineHeight: 17 }}>
@@ -1163,6 +1199,47 @@ export default function App() {
                   NHTSA #{recall.campaignNumber}
                 </Text>
               ) : null}
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                {completed ? (
+                  <TouchableOpacity
+                    style={{ flex: 1, backgroundColor: COLORS.bodyBg, borderRadius: 8, paddingVertical: 10, alignItems: 'center', borderWidth: 0.5, borderColor: COLORS.border }}
+                    onPress={() => {
+                      Alert.alert(
+                        lang === 'EN' ? 'Undo completion?' : '¿Deshacer completado?',
+                        lang === 'EN' ? 'This recall will be moved back to Open.' : 'Este retiro se moverá de nuevo a Abiertos.',
+                        [
+                          { text: lang === 'EN' ? 'Cancel' : 'Cancelar', style: 'cancel' },
+                          { text: lang === 'EN' ? 'Undo' : 'Deshacer', onPress: () => undoRecallCompleted(vKey, recall.campaignNumber) },
+                        ]
+                      );
+                    }}
+                  >
+                    <Text style={{ fontSize: 13, color: COLORS.textMuted, fontWeight: '500' }}>
+                      {lang === 'EN' ? 'Undo completion' : 'Deshacer completado'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <TouchableOpacity
+                      style={{ flex: 1, backgroundColor: COLORS.okBg, borderRadius: 8, paddingVertical: 10, alignItems: 'center' }}
+                      onPress={() => {
+                        Alert.alert(
+                          lang === 'EN' ? 'Mark as completed?' : '¿Marcar como completado?',
+                          lang === 'EN' ? 'Confirm this recall repair has been done.' : 'Confirma que esta reparación de retiro ha sido realizada.',
+                          [
+                            { text: lang === 'EN' ? 'Cancel' : 'Cancelar', style: 'cancel' },
+                            { text: lang === 'EN' ? 'Completed' : 'Completado', onPress: () => markRecallCompleted(vKey, recall.campaignNumber) },
+                          ]
+                        );
+                      }}
+                    >
+                      <Text style={{ fontSize: 13, color: COLORS.okText, fontWeight: '600' }}>
+                        ✓ {lang === 'EN' ? 'Mark Completed' : 'Marcar Completado'}
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
             </>
           )}
           <Text style={{ fontSize: 11, color: COLORS.accent, fontWeight: '600', marginTop: 8 }}>
@@ -1227,19 +1304,42 @@ export default function App() {
             </Text>
           </View>
         )}
-        {recalls && recalls.length > 0 && (
-          <View style={s.serviceSection}>
-            <Text style={[s.serviceSectionTitle, { color: COLORS.overdueText }]}>
-              🚨 {lang === 'EN' ? 'Open Safety Recalls' : 'Retiros de Seguridad Abiertos'} ({recalls.length})
-            </Text>
-            {lang === 'ES' && (
-              <Text style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 10, fontStyle: 'italic' }}>
-                Los detalles de los retiros provienen directamente de la NHTSA (agencia del gobierno de EE. UU.) y solo están disponibles en inglés.
-              </Text>
-            )}
-            {recalls.map((r, i) => <RecallCard key={i} recall={r} />)}
-          </View>
-        )}
+        {recalls && recalls.length > 0 && (() => {
+          const openRecalls = recalls.filter(r => !isRecallCompleted(vKey, r.campaignNumber));
+          const doneRecalls = recalls.filter(r => isRecallCompleted(vKey, r.campaignNumber));
+          return (
+            <>
+              {openRecalls.length > 0 && (
+                <View style={s.serviceSection}>
+                  <Text style={[s.serviceSectionTitle, { color: COLORS.overdueText }]}>
+                    🚨 {lang === 'EN' ? 'Open Safety Recalls' : 'Retiros de Seguridad Abiertos'} ({openRecalls.length})
+                  </Text>
+                  {lang === 'ES' && (
+                    <Text style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 10, fontStyle: 'italic' }}>
+                      Los detalles de los retiros provienen directamente de la NHTSA (agencia del gobierno de EE. UU.) y solo están disponibles en inglés.
+                    </Text>
+                  )}
+                  {openRecalls.map((r, i) => <RecallCard key={i} recall={r} vKey={vKey} />)}
+                </View>
+              )}
+              {openRecalls.length === 0 && (
+                <View style={[s.card, { backgroundColor: COLORS.okBg, borderColor: COLORS.okText, alignItems: 'center', paddingVertical: 14 }]}>
+                  <Text style={{ fontSize: 13, color: COLORS.okText, fontWeight: '600' }}>
+                    ✓ {lang === 'EN' ? 'All recalls completed' : 'Todos los retiros completados'}
+                  </Text>
+                </View>
+              )}
+              {doneRecalls.length > 0 && (
+                <View style={s.serviceSection}>
+                  <Text style={[s.serviceSectionTitle, { color: COLORS.okText }]}>
+                    ✓ {lang === 'EN' ? 'Completed Recalls' : 'Retiros Completados'} ({doneRecalls.length})
+                  </Text>
+                  {doneRecalls.map((r, i) => <RecallCard key={i} recall={r} vKey={vKey} />)}
+                </View>
+              )}
+            </>
+          );
+        })()}
         {recalls && recalls.length === 0 && (
           <View style={[s.card, { backgroundColor: COLORS.okBg, borderColor: COLORS.okText, alignItems: 'center', paddingVertical: 14 }]}>
             <Text style={{ fontSize: 13, color: COLORS.okText, fontWeight: '600' }}>

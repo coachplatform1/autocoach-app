@@ -1,7 +1,7 @@
 export const AFFILIATE = {
   ADVANCE_AUTO:   'https://www.advanceautoparts.com',
   AUTOZONE:       'https://www.autozone.com',
-  AMAZON:         'https://www.amazon.com/?tag=poolcoach06-20',
+  AMAZON:         'https://www.amazon.com/?tag=autocoach06-20',
   TIRE_RACK:      'https://www.tirerack.com',
   SIMPLE_TIRE:    'https://www.simpletire.com',
   MAVIS:          'https://www.mavistire.com',
