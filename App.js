@@ -1443,8 +1443,8 @@ export default function App() {
     }
 
     return (
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior='padding' keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
-      <ScrollView style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+      <ScrollView automaticallyAdjustKeyboardInsets={true} style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
         <TouchableOpacity style={s.backBtn} onPress={() => setActiveTab('schedule')}>
           <Text style={s.backBtnText}>← {T('btn_back')}</Text>
         </TouchableOpacity>
@@ -2004,8 +2004,8 @@ export default function App() {
     }
 
     return (
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior='padding' keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
-      <ScrollView style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+      <ScrollView automaticallyAdjustKeyboardInsets={true} style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
         {vehicles.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.vehicleChipRow}>
             {vehicles.map((v, i) => (

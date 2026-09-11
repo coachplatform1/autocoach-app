@@ -30,6 +30,7 @@
         "backgroundColor": "#E85C04"
       },
       "edgeToEdgeEnabled": true,
+      "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "android.permission.SCHEDULE_EXACT_ALARM"
       ]
