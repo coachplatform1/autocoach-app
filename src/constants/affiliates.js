@@ -1,10 +1,9 @@
 export const AFFILIATE = {
-  ADVANCE_AUTO:   'https://www.advanceautoparts.com',
   AUTOZONE:       'https://www.autozone.com',
   AMAZON:         'https://www.amazon.com/?tag=autocoach06-20',
-  TIRE_RACK:      'https://www.tirerack.com',
   SIMPLE_TIRE:    'https://www.simpletire.com',
-  MAVIS:          'https://www.mavistire.com',
+  MAVIS:          'https://www.kqzyfj.com/click-101879486-15764585?sid=autocoach_app_tires',
+  PARTSGEEK:      'https://www.anrdoezrs.net/click-101879486-13699760?sid=autocoach_app_parts_general',
   VALVOLINE:      'https://www.valvoline.com',
   SAFELITE:       'https://www.safelite.com',
   EDMUNDS:        'https://www.edmunds.com',

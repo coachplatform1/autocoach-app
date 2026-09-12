@@ -37,12 +37,11 @@ import FleetPricingCalculator from './src/components/FleetPricingCalculator';
 // (real partner list from src/constants/affiliates.js)
 // ─────────────────────────────────────────────
 const AFFILIATE_LABELS = {
-  ADVANCE_AUTO:   'Advance Auto Parts',
   AUTOZONE:       'AutoZone',
   AMAZON:         'Amazon',
-  TIRE_RACK:      'Tire Rack',
   SIMPLE_TIRE:    'SimpleTire',
   MAVIS:          'Mavis Tires',
+  PARTSGEEK:      'Parts Geek',
   VALVOLINE:      'Valvoline',
   SAFELITE:       'Safelite',
   EDMUNDS:        'Edmunds',
@@ -61,28 +60,28 @@ const AFFILIATE_LABELS = {
 // Falls back to DEFAULT_SHOP_ENTRY for any service id not listed here
 // (keeps this future-proof as new services get added to the DB).
 const SERVICE_SHOP_MAP = {
-  oil_filter:         { icon: '🛢️', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AMAZON'] },
-  tire_rotation:      { icon: '🛞', primary: 'TIRE_RACK',     alternates: ['SIMPLE_TIRE', 'MAVIS'] },
-  air_filter_cabin:   { icon: '🌬️', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AMAZON'] },
-  air_filter_engine:  { icon: '🌬️', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AMAZON'] },
-  brake_inspection:   { icon: '🛑', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AUTONATION'] },
-  spark_plugs:        { icon: '🔥', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AMAZON'] },
+  oil_filter:         { icon: '🛢️', primary: 'PARTSGEEK', alternates: ['AMAZON'] },
+  tire_rotation:      { icon: '🛞', primary: 'MAVIS',      alternates: [] },
+  air_filter_cabin:   { icon: '🌬️', primary: 'PARTSGEEK', alternates: ['AMAZON'] },
+  air_filter_engine:  { icon: '🌬️', primary: 'PARTSGEEK', alternates: ['AMAZON'] },
+  brake_inspection:   { icon: '🛑', primary: 'PARTSGEEK', alternates: ['AUTONATION'] },
+  spark_plugs:        { icon: '🔥', primary: 'PARTSGEEK', alternates: ['AMAZON'] },
   transmission:       { icon: '⚙️', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
-  coolant:            { icon: '❄️', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE'] },
-  brake_fluid:        { icon: '🧯', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE'] },
-  battery:            { icon: '🔋', primary: 'BATTERY_TENDER', alternates: ['ADVANCE_AUTO', 'AUTOZONE'] },
-  serpentine_belt:    { icon: '➰', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE'] },
-  wiper_blades:       { icon: '🌧️', primary: 'SAFELITE',    alternates: ['ADVANCE_AUTO', 'AMAZON'] },
+  coolant:            { icon: '❄️', primary: 'PARTSGEEK', alternates: [] },
+  brake_fluid:        { icon: '🧯', primary: 'PARTSGEEK', alternates: [] },
+  battery:            { icon: '🔋', primary: 'BATTERY_TENDER', alternates: ['AUTOZONE'] },
+  serpentine_belt:    { icon: '➰', primary: 'PARTSGEEK', alternates: [] },
+  wiper_blades:       { icon: '🌧️', primary: 'SAFELITE',    alternates: ['AMAZON'] },
   fuel_filter_diesel: { icon: '⛽', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
-  def_fluid:          { icon: '💧', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AMAZON'] },
+  def_fluid:          { icon: '💧', primary: 'PARTSGEEK', alternates: ['AMAZON'] },
   glow_plugs:         { icon: '🔥', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
   egr_cleaning:       { icon: '🧰', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
   dpf_cleaning:       { icon: '🧰', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
   turbo_inspection:   { icon: '🧰', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
   hybrid_battery:     { icon: '🔋', primary: 'AUTONATION',   alternates: ['FINDITPARTS'] },
-  hybrid_brake:       { icon: '🛑', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE'] },
+  hybrid_brake:       { icon: '🛑', primary: 'PARTSGEEK', alternates: [] },
 };
-const DEFAULT_SHOP_ENTRY = { icon: '🔧', primary: 'ADVANCE_AUTO', alternates: ['AUTOZONE', 'AMAZON'] };
+const DEFAULT_SHOP_ENTRY = { icon: '🔧', primary: 'PARTSGEEK', alternates: ['AMAZON'] };
 
 // Google Play / App Store reviewers can't complete a real purchase or use a
 // "free trial" to access subscription-gated content — this code lets a
@@ -1443,8 +1442,8 @@ export default function App() {
     }
 
     return (
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior='padding' keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
-      <ScrollView style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+      <ScrollView automaticallyAdjustKeyboardInsets={true} style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
         <TouchableOpacity style={s.backBtn} onPress={() => setActiveTab('schedule')}>
           <Text style={s.backBtnText}>← {T('btn_back')}</Text>
         </TouchableOpacity>
@@ -1493,8 +1492,8 @@ export default function App() {
         {(() => {
           const map = SERVICE_SHOP_MAP[svc.id] || DEFAULT_SHOP_ENTRY;
           const AFFILIATE_NAMES = {
-            ADVANCE_AUTO: 'Advance Auto Parts', AUTOZONE: 'AutoZone', AMAZON: 'Amazon',
-            TIRE_RACK: 'Tire Rack', SIMPLE_TIRE: 'SimpleTire', MAVIS: 'Mavis Tires',
+            AUTOZONE: 'AutoZone', AMAZON: 'Amazon',
+            SIMPLE_TIRE: 'SimpleTire', MAVIS: 'Mavis Tires', PARTSGEEK: 'Parts Geek',
             AUTONATION: 'AutoNation Parts', FINDITPARTS: 'FindItParts', BATTERY_TENDER: 'Battery Tender',
             SAFELITE: 'Safelite', CHEMICAL_GUYS: 'Chemical Guys', EASTWOOD: 'Eastwood',
           };
@@ -2004,8 +2003,8 @@ export default function App() {
     }
 
     return (
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior='padding' keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
-      <ScrollView style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+      <ScrollView automaticallyAdjustKeyboardInsets={true} style={s.screen} contentContainerStyle={s.screenContent} keyboardShouldPersistTaps="handled">
         {vehicles.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.vehicleChipRow}>
             {vehicles.map((v, i) => (
@@ -2271,7 +2270,7 @@ export default function App() {
         <Text style={s.screenTitle}>{T('shop_title')}</Text>
         <Text style={s.shopSubtitle}>{T('shop_subtitle')}</Text>
 
-        <TouchableOpacity style={s.shopAllPartsBig} onPress={() => openAffiliateLink('ADVANCE_AUTO')}>
+        <TouchableOpacity style={s.shopAllPartsBig} onPress={() => openAffiliateLink('PARTSGEEK')}>
           <Text style={s.shopAllPartsBigIcon}>🔎</Text>
           <View style={{ flex: 1 }}>
             <Text style={s.shopAllPartsBigTitle}>{T('shop_all_parts')}</Text>
@@ -2333,17 +2332,9 @@ export default function App() {
                 <View style={s.shopDueBadge}><Text style={s.shopDueBadgeText}>{T('shop_due_now')}</Text></View>
               )}
             </View>
-            <TouchableOpacity style={s.shopBuyBtn} onPress={() => openAffiliateLink('TIRE_RACK')}>
-              <Text style={s.shopBuyBtnText}>{T('shop_buy')} — {AFFILIATE_LABELS.TIRE_RACK}</Text>
+            <TouchableOpacity style={s.shopBuyBtn} onPress={() => openAffiliateLink('MAVIS')}>
+              <Text style={s.shopBuyBtnText}>{T('shop_buy')} — {AFFILIATE_LABELS.MAVIS}</Text>
             </TouchableOpacity>
-            <View style={s.shopAltRow}>
-              <TouchableOpacity onPress={() => openAffiliateLink('SIMPLE_TIRE')}>
-                <Text style={s.shopAltLink}>{T('shop_view')} — {AFFILIATE_LABELS.SIMPLE_TIRE}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => openAffiliateLink('MAVIS')}>
-                <Text style={s.shopAltLink}>{T('shop_view')} — {AFFILIATE_LABELS.MAVIS}</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
 
