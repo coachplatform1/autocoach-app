@@ -73,6 +73,11 @@ export function useRevenueCat(T = (key) => key) {
           Purchases.configure({ apiKey: 'goog_sZtMrfVzOYCNJjTNctzwXkDKiVf' });
         }
 
+        if (__DEV__) {
+          const { customerInfo } = await Purchases.logIn("ankit-dev-device");
+          console.log("🛠️ RevenueCat Dev User Logged In:", customerInfo.originalAppUserId);
+        }
+
         const customerInfo = await Purchases.getCustomerInfo();
         updateStateFromCustomerInfo(customerInfo);
         
