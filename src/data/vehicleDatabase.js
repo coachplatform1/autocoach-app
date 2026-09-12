@@ -117,6 +117,8 @@ function hybridServices(oilSpec, oilQty, filterPN) {
   ];
 }
 
+const hybridGasServices = hybridServices;
+
 function cvtNote(brand) {
   return `CVT transmission — use only ${brand} CVT fluid. CRITICAL: Wrong fluid destroys the CVT.`;
 }
