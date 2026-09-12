@@ -32,6 +32,7 @@
       "edgeToEdgeEnabled": true,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
+        "android.permission.SCHEDULE_EXACT_ALARM",
         "android.permission.SCHEDULE_EXACT_ALARM"
       ]
     },
@@ -50,6 +51,12 @@
       "eas": {
         "projectId": "b4572ca2-e8b8-4f89-89c0-3768de43c84f"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/b4572ca2-e8b8-4f89-89c0-3768de43c84f"
     }
   }
 }
