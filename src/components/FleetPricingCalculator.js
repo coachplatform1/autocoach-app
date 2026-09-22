@@ -262,10 +262,7 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
   // ── Primary button label ──────────────────
   function primaryLabel() {
     if (isEnterprise) return T('calc_cta_enterprise');
-    if (!activeTier) return '';
-    const price = billingCycle === 'annual' ? activeTier.annual : activeTier.price;
-    const suffix = billingCycle === 'annual' ? T('calc_annual_suffix') : T('calc_cta_subscribe_suffix');
-    return `${T('calc_cta_subscribe_prefix')}${price.toFixed(2)}${suffix}`;
+    return lang === 'EN' ? 'Start Free Trial' : 'Iniciar Prueba Gratis';
   }
 
   function secondaryLabel() {
@@ -342,6 +339,19 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
 
           {/* Vehicle count */}
           <Text style={s.vehicleCount}>{tierVehicles(activeTier.id)}</Text>
+
+          {/* 7-Day Free Trial Notice */}
+          <View style={{ backgroundColor: '#FFF3E0', borderRadius: 8, padding: 10, marginBottom: 10 }}>
+            <Text style={{ fontSize: 12, color: '#BF360C', fontWeight: '600', lineHeight: 17 }}>
+              {billingCycle === 'annual'
+                ? (lang === 'EN'
+                    ? `7-day free trial, then $${activeTier.annual.toFixed(2)}/year. Cancel anytime.`
+                    : `Prueba gratis de 7 dias, luego $${activeTier.annual.toFixed(2)}/ano. Cancela cuando quieras.`)
+                : (lang === 'EN'
+                    ? `7-day free trial, then $${activeTier.price.toFixed(2)}/month. Cancel anytime.`
+                    : `Prueba gratis de 7 dias, luego $${activeTier.price.toFixed(2)}/mes. Cancela cuando quieras.`)}
+            </Text>
+          </View>
 
           {/* Annual savings line */}
           <View style={s.annualRow}>
@@ -447,10 +457,12 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
         <Text style={s.primaryBtnText} adjustsFontSizeToFit numberOfLines={1}>{primaryLabel()}</Text>
       </TouchableOpacity>
 
-      {/* Secondary CTA */}
-      <TouchableOpacity style={s.secondaryBtn} onPress={handleSecondary} activeOpacity={0.85}>
-        <Text style={s.secondaryBtnText} adjustsFontSizeToFit numberOfLines={1}>{secondaryLabel()}</Text>
-      </TouchableOpacity>
+      {/* Secondary CTA (only for Enterprise) */}
+      {isEnterprise && (
+        <TouchableOpacity style={s.secondaryBtn} onPress={handleSecondary} activeOpacity={0.85}>
+          <Text style={s.secondaryBtnText} adjustsFontSizeToFit numberOfLines={1}>{secondaryLabel()}</Text>
+        </TouchableOpacity>
+      )}
 
     </View>
   );

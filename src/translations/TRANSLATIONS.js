@@ -114,6 +114,35 @@ export const TRANSLATIONS = {
   // ─────────────────────────────────────────────
   // SUBSCRIPTION / PAYWALL
   // ─────────────────────────────────────────────
+    // IN-APP REVIEW PROMPT
+  review_helpful: {
+    EN: 'Are you finding AutoCoach helpful?',
+    ES: 'Te esta siendo util AutoCoach?',
+  },
+  review_yes: {
+    EN: 'Yes',
+    ES: 'Si',
+  },
+  review_no: {
+    EN: 'Not really',
+    ES: 'No realmente',
+  },
+  review_feedback_title: {
+    EN: 'Tell us how we can improve',
+    ES: 'Cuentanos como podemos mejorar',
+  },
+  review_submit: {
+    EN: 'Submit',
+    ES: 'Enviar',
+  },
+  review_cancel: {
+    EN: 'Cancel',
+    ES: 'Cancelar',
+  },
+  paywall_btn: {
+    EN: 'Start Free Trial',
+    ES: 'Iniciar Prueba Gratis',
+  },
   paywall_title: {
     EN: "AutoCoach Pro",
     ES: "AutoCoach Pro",

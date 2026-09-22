@@ -5,7 +5,10 @@ import {
   Platform, ScrollView,
   TextInput, ActivityIndicator, Alert,
   KeyboardAvoidingView, Modal, FlatList, Share, Linking, Switch,
+  Keyboard, TouchableWithoutFeedback,
 } from 'react-native';
+import * as StoreReview from 'expo-store-review';
+import appConfig from './app.json';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
@@ -29,6 +32,8 @@ import {
 import { AFFILIATE } from './src/constants/affiliates';
 
 import FleetPricingCalculator from './src/components/FleetPricingCalculator';
+
+const APP_VERSION = appConfig?.expo?.version || '1.0.0';
 
 // expo-camera integrated during production build
 
@@ -416,6 +421,89 @@ export default function App() {
   const [showSupportChat, setShowSupportChat] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const reviewCodeInputRef = useRef('');
+  const [showInAppReviewPrompt, setShowInAppReviewPrompt] = useState(false);
+  const [reviewStep, setReviewStep]                       = useState('prompt'); // 'prompt' | 'feedback'
+  const [reviewFeedbackText, setReviewFeedbackText]       = useState('');
+
+  // Track subscription date for review prompt trigger
+  useEffect(() => {
+    if (isPro) {
+      AsyncStorage.getItem('autocoach_first_subscribed_date').then(val => {
+        if (!val) {
+          AsyncStorage.setItem('autocoach_first_subscribed_date', Date.now().toString()).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+  }, [isPro]);
+
+  const logMeaningfulActionAndCheckReview = async () => {
+    try {
+      const countRaw = await AsyncStorage.getItem('autocoach_meaningful_actions_count');
+      const count = (parseInt(countRaw || '0', 10)) + 1;
+      await AsyncStorage.setItem('autocoach_meaningful_actions_count', count.toString());
+      checkStoreReview(count);
+    } catch (e) {
+      console.warn('Error logging meaningful action', e);
+    }
+  };
+
+  const checkStoreReview = async (currentActionCount) => {
+    try {
+      if (!isPro) return; // Trigger 1: Must be subscribed (trial or paid)
+
+      const hasReviewed = await AsyncStorage.getItem(`autocoach_has_reviewed_v${APP_VERSION}`);
+      if (hasReviewed === 'true') return; // Trigger 3: Prompt has not been shown for this version
+
+      const subDateRaw = await AsyncStorage.getItem('autocoach_first_subscribed_date');
+      if (!subDateRaw) return;
+      const daysSubscribed = (Date.now() - parseInt(subDateRaw, 10)) / (1000 * 60 * 60 * 24);
+      if (daysSubscribed < 3) return; // Trigger 1: Subscribed for at least 3 days
+
+      const count = currentActionCount !== undefined
+        ? currentActionCount
+        : parseInt(await AsyncStorage.getItem('autocoach_meaningful_actions_count') || '0', 10);
+      if (count < 2) return; // Trigger 2: At least 2 meaningful actions completed (2 services or 2 fuel stops)
+
+      setReviewStep('prompt');
+      setShowInAppReviewPrompt(true);
+    } catch (e) {
+      console.warn('Store review error', e);
+    }
+  };
+
+  const handleReviewYes = async () => {
+    setShowInAppReviewPrompt(false);
+    await AsyncStorage.setItem(`autocoach_has_reviewed_v${APP_VERSION}`, 'true').catch(() => {});
+    try {
+      if (await StoreReview.hasAction()) {
+        await StoreReview.requestReview();
+      }
+    } catch (e) {
+      console.warn('Store review request error', e);
+    }
+  };
+
+  const handleReviewNotReally = () => {
+    setReviewStep('feedback');
+  };
+
+  const handleReviewCancelFeedback = async () => {
+    setShowInAppReviewPrompt(false);
+    setReviewFeedbackText('');
+    await AsyncStorage.setItem(`autocoach_has_reviewed_v${APP_VERSION}`, 'true').catch(() => {});
+  };
+
+  const handleReviewSubmitFeedback = async () => {
+    setShowInAppReviewPrompt(false);
+    const feedback = reviewFeedbackText.trim();
+    setReviewFeedbackText('');
+    await AsyncStorage.setItem(`autocoach_has_reviewed_v${APP_VERSION}`, 'true').catch(() => {});
+    const subject = encodeURIComponent('AutoCoach Feedback');
+    const body = encodeURIComponent(feedback);
+    Linking.openURL(`mailto:support@coachplatform.app?subject=${subject}&body=${body}`).catch(() => {
+      Alert.alert(T('alert_error_title') || 'Error', 'Could not open email client. Please email us directly at support@coachplatform.app');
+    });
+  };
   const [documents, setDocuments]             = useState([]);
   const [recallsCache, setRecallsCache]       = useState({}); // vKey -> array | null (undefined = not yet loaded)
   const [completedRecalls, setCompletedRecalls] = useState({}); // { 'vKey_campaignNumber': { completedDate, campaignNumber } }
@@ -1432,6 +1520,7 @@ export default function App() {
       };
       setServiceHistory(updated);
       AsyncStorage.setItem('autocoach_service_history', JSON.stringify(updated));
+      logMeaningfulActionAndCheckReview();
       Alert.alert(
         lang === 'EN' ? 'Service logged ✓' : 'Servicio registrado ✓',
         lang === 'EN'
@@ -1908,6 +1997,7 @@ export default function App() {
       }
       setFuelLog(updated);
       AsyncStorage.setItem('autocoach_fuel_log', JSON.stringify(updated));
+      if (editingIndex === null) logMeaningfulActionAndCheckReview();
       setMileage(''); setGallons(''); setPricePerGal('');
       setOdometerPhoto(null); setShowAddForm(false); setScannedDateTime(null); setManualDate(null); setEditingIndex(null);
 
@@ -3083,6 +3173,87 @@ export default function App() {
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* Soft Review Prompt Modal */}
+      <Modal
+        visible={showInAppReviewPrompt}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowInAppReviewPrompt(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1 }}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+              <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+                <View style={{ backgroundColor: COLORS.cardBg, borderRadius: 20, padding: 24, width: "100%", maxWidth: 360, borderWidth: 0.5, borderColor: COLORS.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 10, elevation: 8 }}>
+                  {reviewStep === "prompt" ? (
+                    <View style={{ alignItems: "center" }}>
+                      <Text style={{ fontSize: 40, marginBottom: 16 }}>⭐</Text>
+                      <Text style={{ fontSize: 18, fontWeight: "700", color: COLORS.textNavy, textAlign: "center", marginBottom: 24, lineHeight: 25 }}>
+                        {T("review_helpful")}
+                      </Text>
+                      <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
+                        <TouchableOpacity
+                          onPress={handleReviewNotReally}
+                          style={{ flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, alignItems: "center", backgroundColor: COLORS.bodyBg }}>
+                          <Text style={{ color: COLORS.textMuted, fontSize: 15, fontWeight: "600" }}>{T("review_no")}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={handleReviewYes}
+                          style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: COLORS.accent, alignItems: "center" }}>
+                          <Text style={{ color: COLORS.white, fontSize: 15, fontWeight: "700" }}>{T("review_yes")}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    <View>
+                      <Text style={{ fontSize: 17, fontWeight: "700", color: COLORS.textNavy, marginBottom: 12, textAlign: "center" }}>
+                        {T("review_feedback_title")}
+                      </Text>
+                      <TextInput
+                        style={{
+                          backgroundColor: COLORS.bodyBg,
+                          borderRadius: 12,
+                          borderWidth: 1,
+                          borderColor: COLORS.border,
+                          color: COLORS.textPrimary,
+                          padding: 12,
+                          minHeight: 110,
+                          textAlignVertical: "top",
+                          fontSize: 14,
+                          marginBottom: 18,
+                        }}
+                        multiline
+                        numberOfLines={4}
+                        placeholder={lang === "EN" ? "Your feedback..." : "Tus comentarios..."}
+                        placeholderTextColor={COLORS.textMuted}
+                        value={reviewFeedbackText}
+                        onChangeText={setReviewFeedbackText}
+                      />
+                      <View style={{ flexDirection: "row", gap: 12 }}>
+                        <TouchableOpacity
+                          onPress={handleReviewCancelFeedback}
+                          style={{ flex: 1, paddingVertical: 13, borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, alignItems: "center", backgroundColor: COLORS.bodyBg }}>
+                          <Text style={{ color: COLORS.textMuted, fontSize: 14, fontWeight: "600" }}>{T("review_cancel")}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={handleReviewSubmitFeedback}
+                          style={{ flex: 1, paddingVertical: 13, borderRadius: 12, backgroundColor: COLORS.accent, alignItems: "center" }}>
+                          <Text style={{ color: COLORS.white, fontSize: 14, fontWeight: "700" }}>{T("review_submit")}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
