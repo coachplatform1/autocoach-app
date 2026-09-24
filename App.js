@@ -2997,7 +2997,7 @@ export default function App() {
           AutoCoach™
         </Text>
         <Text style={s.settingsVersion} onLongPress={() => setShowReviewModal(true)} delayLongPress={800}>
-          {T('settings_version')} 1.0.0 (dev)
+          {T('settings_version')} {APP_VERSION}
         </Text>
       </ScrollView>
 
