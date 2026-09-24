@@ -616,6 +616,55 @@ export default function App() {
     AsyncStorage.setItem('autocoach_vehicles', JSON.stringify(updated));
   }
 
+  // A vehicle object is held in two places at once — the `vehicles` array and
+  // `activeVehicle` — and several screens compare the two with === (the
+  // vehicle chips, for one), so an edit has to replace the object in the
+  // array AND re-point activeVehicle at the replacement. Identity is the
+  // primary match; the year/make/model/engine tuple is the fallback for a
+  // reference captured in an older render that has since gone stale.
+  function isSameVehicle(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    return a.year === b.year && a.make === b.make
+        && a.model === b.model && a.engine === b.engine;
+  }
+
+  // The only path that moves vehicle.mileage after a vehicle is added. What
+  // it writes is what ScheduleScreen, ShopScreen and scheduleServiceReminders
+  // all read as "current mileage", and saving vehicles re-runs the
+  // notification effect below, so reminders re-project off the new odometer.
+  function updateVehicleMileage(target, miles) {
+    const next = Number(miles);
+    if (!target || !next || next < 1) return;
+    let replacement = null;
+    const updated = vehicles.map(v => {
+      // Only the first match — two identical vehicles can coexist in the
+      // garage, and this should move one odometer, not both.
+      if (replacement || !isSameVehicle(v, target)) return v;
+      replacement = { ...v, mileage: next };
+      return replacement;
+    });
+    if (!replacement) return;
+    saveVehicles(updated);
+    if (isSameVehicle(activeVehicle, target)) setActiveVehicle(replacement);
+  }
+
+  // Removes one vehicle by its position in the garage (by index, not by
+  // value, so a duplicate entry doesn't take its twin with it). Service
+  // history, the fuel log and documents are keyed by year_make_model rather
+  // than by the vehicle object, so they're deliberately left in place: a
+  // second vehicle can share that key, and re-adding the vehicle restores
+  // its records.
+  function deleteVehicleAt(index) {
+    const target = vehicles[index];
+    if (!target) return;
+    const updated = vehicles.filter((_, i) => i !== index);
+    saveVehicles(updated);
+    if (isSameVehicle(activeVehicle, target)) {
+      setActiveVehicle(updated.length > 0 ? updated[0] : null);
+    }
+  }
+
   function toggleLang() {
     const n = lang === 'EN' ? 'ES' : 'EN';
     setLang(n);
@@ -1056,6 +1105,55 @@ export default function App() {
   // GARAGE SCREEN
   // ─────────────────────────────────────────────
   function GarageScreen() {
+    // Kept local to this screen on purpose: typing in the mileage editor then
+    // re-renders only the garage. The same state at App() level would
+    // recreate — and so remount — every nested screen on each keystroke,
+    // costing the input its focus (the reason SettingsScreen's reviewer-code
+    // modal has to drive its TextInput off a ref instead of state).
+    const [mileageEditIndex, setMileageEditIndex] = useState(null);
+    const [mileageEditText, setMileageEditText]   = useState('');
+    const editingVehicle = mileageEditIndex !== null ? vehicles[mileageEditIndex] : null;
+
+    function openMileageEditor(index) {
+      const v = vehicles[index];
+      setMileageEditIndex(index);
+      setMileageEditText(v?.mileage ? String(v.mileage) : '');
+    }
+
+    function closeMileageEditor() {
+      setMileageEditIndex(null);
+      setMileageEditText('');
+    }
+
+    function saveMileageEdit() {
+      const miles = parseInt(mileageEditText.replace(/,/g, ''), 10);
+      if (!miles || miles < 1) {
+        Alert.alert('', lang === 'EN' ? 'Please enter a valid mileage.' : 'Por favor ingresa un kilometraje válido.');
+        return;
+      }
+      updateVehicleMileage(editingVehicle, miles);
+      closeMileageEditor();
+    }
+
+    function confirmDeleteVehicle(index) {
+      const v = vehicles[index];
+      if (!v) return;
+      Alert.alert(
+        lang === 'EN' ? 'Delete this vehicle?' : '¿Eliminar este vehículo?',
+        lang === 'EN'
+          ? `${v.year} ${v.make} ${v.model} will be removed from your garage. Its service history, fuel log and documents are kept — they come back if you add this vehicle again.`
+          : `${v.year} ${v.make} ${v.model} se eliminará de tu garaje. Su historial de servicio, registro de combustible y documentos se conservan — vuelven si agregas este vehículo de nuevo.`,
+        [
+          { text: lang === 'EN' ? 'Cancel' : 'Cancelar', style: 'cancel' },
+          {
+            text: lang === 'EN' ? 'Delete' : 'Eliminar',
+            style: 'destructive',
+            onPress: () => deleteVehicleAt(index),
+          },
+        ]
+      );
+    }
+
     let totalDue = 0;
     vehicles.forEach(v => {
       const schedule = getMaintenanceSchedule(v.make, v.model, v.engine);
@@ -1067,6 +1165,7 @@ export default function App() {
     });
 
     return (
+      <>
       <ScrollView style={s.screen} contentContainerStyle={s.screenContent}>
         <View style={s.statRow}>
           <View style={s.statCard}>
@@ -1103,27 +1202,46 @@ export default function App() {
               soonCount = due.filter(s => s.status === 'due_soon').length;
             }
             return (
-              <TouchableOpacity
-                key={index}
-                style={s.vehicleCard}
-                onPress={() => { setActiveVehicle(vehicle); setActiveTab('schedule'); }}
-              >
-                <View style={s.vehicleCardHeader}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={s.vehicleName}>{vehicle.year} {vehicle.make} {vehicle.model}</Text>
-                    <Text style={s.vehicleSub}>
-                      {vehicle.engine}{vehicle.mileage ? ' · ' + Number(vehicle.mileage).toLocaleString() + ' mi' : ''}
-                    </Text>
+              <View key={index} style={s.vehicleCard}>
+                <TouchableOpacity
+                  onPress={() => { setActiveVehicle(vehicle); setActiveTab('schedule'); }}
+                >
+                  <View style={s.vehicleCardHeader}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={s.vehicleName}>{vehicle.year} {vehicle.make} {vehicle.model}</Text>
+                      <Text style={s.vehicleSub}>
+                        {vehicle.engine}{vehicle.mileage ? ' · ' + Number(vehicle.mileage).toLocaleString() + ' mi' : ''}
+                      </Text>
+                    </View>
+                    {overdueCount > 0 ? (
+                      <View style={s.badgeOd}><Text style={s.badgeOdText}>{overdueCount} {T('svc_status_overdue')}</Text></View>
+                    ) : soonCount > 0 ? (
+                      <View style={s.badgeSoon}><Text style={s.badgeSoonText}>{soonCount} {T('svc_status_due_soon')}</Text></View>
+                    ) : (
+                      <View style={s.badgeOk}><Text style={s.badgeOkText}>{T('garage_all_current')}</Text></View>
+                    )}
                   </View>
-                  {overdueCount > 0 ? (
-                    <View style={s.badgeOd}><Text style={s.badgeOdText}>{overdueCount} {T('svc_status_overdue')}</Text></View>
-                  ) : soonCount > 0 ? (
-                    <View style={s.badgeSoon}><Text style={s.badgeSoonText}>{soonCount} {T('svc_status_due_soon')}</Text></View>
-                  ) : (
-                    <View style={s.badgeOk}><Text style={s.badgeOkText}>{T('garage_all_current')}</Text></View>
-                  )}
+                </TouchableOpacity>
+
+                <View style={s.vehicleCardActions}>
+                  <TouchableOpacity
+                    style={s.vehicleCardAction}
+                    onPress={() => openMileageEditor(index)}
+                  >
+                    <Text style={s.vehicleCardActionText}>
+                      {lang === 'EN' ? '✏️  Edit mileage' : '✏️  Editar kilometraje'}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[s.vehicleCardAction, s.vehicleCardActionDanger]}
+                    onPress={() => confirmDeleteVehicle(index)}
+                  >
+                    <Text style={[s.vehicleCardActionText, s.vehicleCardActionDangerText]}>
+                      {lang === 'EN' ? '🗑  Delete' : '🗑  Eliminar'}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
-              </TouchableOpacity>
+              </View>
             );
           })
         )}
@@ -1165,6 +1283,56 @@ export default function App() {
           </>
         )}
       </ScrollView>
+
+      {/* Manual odometer update — the second way vehicle.mileage moves, for
+          the miles driven since the last fill-up was logged. */}
+      <Modal
+        visible={editingVehicle !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeMileageEditor}
+      >
+        <KeyboardAvoidingView
+          style={s.reviewModalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={s.reviewModalCard}>
+            <Text style={s.reviewModalTitle}>
+              {lang === 'EN' ? 'Update Mileage' : 'Actualizar Kilometraje'}
+            </Text>
+            <Text style={s.reviewModalBody}>
+              {editingVehicle ? `${editingVehicle.year} ${editingVehicle.make} ${editingVehicle.model} — ` : ''}
+              {lang === 'EN'
+                ? 'Enter the current odometer reading.'
+                : 'Ingresa la lectura actual del odómetro.'}
+            </Text>
+            <TextInput
+              style={s.reviewModalInput}
+              value={mileageEditText}
+              onChangeText={setMileageEditText}
+              placeholder="94,210"
+              placeholderTextColor={COLORS.textMuted}
+              keyboardType="number-pad"
+              autoFocus
+            />
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+              <TouchableOpacity
+                style={[s.reviewModalBtn, s.reviewModalBtnCancel]}
+                onPress={closeMileageEditor}
+              >
+                <Text style={s.reviewModalBtnCancelText}>{lang === 'EN' ? 'Cancel' : 'Cancelar'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.reviewModalBtn, s.reviewModalBtnSubmit]}
+                onPress={saveMileageEdit}
+              >
+                <Text style={s.reviewModalBtnSubmitText}>{lang === 'EN' ? 'Save' : 'Guardar'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+      </>
     );
   }
 
@@ -1997,6 +2165,13 @@ export default function App() {
       }
       setFuelLog(updated);
       AsyncStorage.setItem('autocoach_fuel_log', JSON.stringify(updated));
+
+      // A fill-up is an odometer reading, so it also becomes the vehicle's
+      // current mileage. Forward only: a back-dated fill-up, or an edit that
+      // corrects an older entry, must not roll the odometer backwards.
+      const odometerAdvanced = miles > Number(activeVehicle.mileage || 0);
+      if (odometerAdvanced) updateVehicleMileage(activeVehicle, miles);
+
       if (editingIndex === null) logMeaningfulActionAndCheckReview();
       setMileage(''); setGallons(''); setPricePerGal('');
       setOdometerPhoto(null); setShowAddForm(false); setScannedDateTime(null); setManualDate(null); setEditingIndex(null);
@@ -2007,7 +2182,9 @@ export default function App() {
           : (lang === 'EN' ? 'Fuel stop logged ✓' : 'Parada registrada ✓'),
         lang === 'EN'
           ? `${gals} gal at ${miles.toLocaleString()} mi${price ? ` — $${total.toFixed(2)}` : ''}`
+            + (odometerAdvanced ? `\nOdometer updated to ${miles.toLocaleString()} mi` : '')
           : `${gals} gal a ${miles.toLocaleString()} mi${price ? ` — $${total.toFixed(2)}` : ''}`
+            + (odometerAdvanced ? `\nOdómetro actualizado a ${miles.toLocaleString()} mi` : '')
       );
     }
 
@@ -3308,6 +3485,11 @@ const s = StyleSheet.create({
   vehicleCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   vehicleName:       { fontSize: 15, fontWeight: '600', color: COLORS.textNavy },
   vehicleSub:        { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
+  vehicleCardActions:      { flexDirection: 'row', gap: 8, marginTop: 12, paddingTop: 10, borderTopWidth: 0.5, borderTopColor: COLORS.border },
+  vehicleCardAction:       { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8, borderWidth: 0.5, borderColor: COLORS.border },
+  vehicleCardActionText:   { fontSize: 12, fontWeight: '600', color: COLORS.textNavy },
+  vehicleCardActionDanger:     { borderColor: COLORS.danger },
+  vehicleCardActionDangerText: { color: COLORS.danger },
 
   badgeOd:       { backgroundColor: COLORS.overdueBg, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
   badgeOdText:   { fontSize: 11, color: COLORS.overdueText, fontWeight: '500' },
