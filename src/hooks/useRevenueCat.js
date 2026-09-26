@@ -14,6 +14,7 @@ const VEHICLE_LIMITS = {
 
 export function useRevenueCat(T = (key) => key) {
   const [isPro, setIsPro] = useState(false);
+  const [isTrial, setIsTrial] = useState(false);
   const [vehicleLimit, setVehicleLimit] = useState(0);
   const [activeProductIds, setActiveProductIds] = useState([]);
   const [purchasing, setPurchasing] = useState(false);
@@ -42,22 +43,27 @@ export function useRevenueCat(T = (key) => key) {
     const activeIds = customerInfo?.activeSubscriptions || [];
     
     let maxLimit = 0;
-    
-    // Check all active entitlements and find the one with the highest vehicle limit
+    let trial = false;
+
+    // Check all active entitlements and find the one with the highest vehicle limit.
+    // Trial status follows that same entitlement, since it's the one granting access.
     Object.keys(entitlements).forEach(entitlementId => {
       const limit = VEHICLE_LIMITS[entitlementId];
       if (limit && limit > maxLimit) {
         maxLimit = limit;
+        trial = entitlements[entitlementId]?.periodType === 'TRIAL';
       }
     });
 
     if (maxLimit > 0) {
       setIsPro(true);
+      setIsTrial(trial);
       setVehicleLimit(maxLimit);
       setActiveProductIds(activeIds);
       return true;
     } else {
       setIsPro(false);
+      setIsTrial(false);
       setVehicleLimit(0);
       setActiveProductIds([]);
       return false;
@@ -182,6 +188,7 @@ export function useRevenueCat(T = (key) => key) {
 
   return {
     isPro,
+    isTrial,
     vehicleLimit,
     activeProductIds,
     purchasing,

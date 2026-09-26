@@ -406,7 +406,7 @@ export default function App() {
   const [fuelLog, setFuelLog]                 = useState([]);
   
   const T = (key) => TRANSLATIONS[key]?.[lang] ?? key;
-  const { isPro, vehicleLimit, purchaseProduct, restorePurchases } = useRevenueCat(T);
+  const { isPro, isTrial, vehicleLimit, purchaseProduct, restorePurchases } = useRevenueCat(T);
   
   const [cameraPermission, setCameraPermission] = useState(null);
   const [checkingGate, setCheckingGate]       = useState(true);
@@ -609,6 +609,20 @@ export default function App() {
     AsyncStorage.setItem('autocoach_disclaimer_agreed', 'true').catch(err =>
       console.error('Could not save disclaimer flag:', err)
     );
+    maybeShowFirstLaunchPaywall();
+  }
+
+  // One-time paywall right after the disclaimer on first launch. The flag
+  // is written before navigating, so a crash or relaunch can't show it twice.
+  async function maybeShowFirstLaunchPaywall() {
+    try {
+      const shown = await AsyncStorage.getItem('autocoach_paywall_first_launch_shown');
+      if (shown === 'true' || isPro) return;
+      await AsyncStorage.setItem('autocoach_paywall_first_launch_shown', 'true');
+      setActiveTab('paywall');
+    } catch (e) {
+      console.warn('First-launch paywall check failed', e);
+    }
   }
 
   function saveVehicles(updated) {
@@ -922,10 +936,27 @@ export default function App() {
   }
 
   function addVehicle(vehicle) {
+    const isFirstVehicle = vehicles.length === 0;
     const updated = [...vehicles, vehicle];
     saveVehicles(updated);
     setActiveVehicle(vehicle);
     setActiveTab('garage');
+    if (isFirstVehicle) maybeShowFirstVehiclePaywall();
+  }
+
+  // One-time paywall after the first vehicle is added, for users still on
+  // the free trial (adding a vehicle already requires an active entitlement,
+  // so "not subscribed" users can't get here). Tracked separately from the
+  // first-launch flag.
+  async function maybeShowFirstVehiclePaywall() {
+    try {
+      const shown = await AsyncStorage.getItem('autocoach_paywall_first_vehicle_shown');
+      if (shown === 'true' || !isTrial) return;
+      await AsyncStorage.setItem('autocoach_paywall_first_vehicle_shown', 'true');
+      setActiveTab('paywall');
+    } catch (e) {
+      console.warn('First-vehicle paywall check failed', e);
+    }
   }
 
   // Gated entry point for "+ Add Vehicle" — AutoCoach has no free tier,
@@ -1048,6 +1079,7 @@ export default function App() {
                 'autocoach_subscribed_tier', 'autocoach_onboarding_complete',
                 'autocoach_disclaimer_agreed', 'autocoach_units', 'autocoach_mileage_interval', 'autocoach_interval_scale',
                 'autocoach_notifications_enabled', 'autocoach_location_enabled',
+                'autocoach_paywall_first_launch_shown', 'autocoach_paywall_first_vehicle_shown',
               ]);
             } catch (err) {
               console.error('Reset failed:', err);
