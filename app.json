@@ -24,7 +24,7 @@
     },
     "android": {
       "package": "com.coachplatform.autocoach",
-      "versionCode": 18,
+      "versionCode": 22,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#E85C04"
