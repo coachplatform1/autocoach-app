@@ -15,6 +15,10 @@ const VEHICLE_LIMITS = {
 export function useRevenueCat(T = (key) => key) {
   const [isPro, setIsPro] = useState(false);
   const [isTrial, setIsTrial] = useState(false);
+  const [trialStartDate, setTrialStartDate] = useState(null);
+  // False until the first real getCustomerInfo() resolves, so consumers can
+  // tell "not in a trial" apart from "haven't heard from RevenueCat yet".
+  const [customerInfoLoaded, setCustomerInfoLoaded] = useState(false);
   const [vehicleLimit, setVehicleLimit] = useState(0);
   const [activeProductIds, setActiveProductIds] = useState([]);
   const [purchasing, setPurchasing] = useState(false);
@@ -44,6 +48,7 @@ export function useRevenueCat(T = (key) => key) {
     
     let maxLimit = 0;
     let trial = false;
+    let trialStart = null;
 
     // Check all active entitlements and find the one with the highest vehicle limit.
     // Trial status follows that same entitlement, since it's the one granting access.
@@ -52,18 +57,21 @@ export function useRevenueCat(T = (key) => key) {
       if (limit && limit > maxLimit) {
         maxLimit = limit;
         trial = entitlements[entitlementId]?.periodType === 'TRIAL';
+        trialStart = trial ? entitlements[entitlementId]?.latestPurchaseDateMillis || null : null;
       }
     });
 
     if (maxLimit > 0) {
       setIsPro(true);
       setIsTrial(trial);
+      setTrialStartDate(trialStart);
       setVehicleLimit(maxLimit);
       setActiveProductIds(activeIds);
       return true;
     } else {
       setIsPro(false);
       setIsTrial(false);
+      setTrialStartDate(null);
       setVehicleLimit(0);
       setActiveProductIds([]);
       return false;
@@ -86,6 +94,7 @@ export function useRevenueCat(T = (key) => key) {
 
         const customerInfo = await Purchases.getCustomerInfo();
         updateStateFromCustomerInfo(customerInfo);
+        setCustomerInfoLoaded(true);
         
         // Listen for real-time updates
         Purchases.addCustomerInfoUpdateListener(updateStateFromCustomerInfo);
@@ -189,6 +198,8 @@ export function useRevenueCat(T = (key) => key) {
   return {
     isPro,
     isTrial,
+    trialStartDate,
+    customerInfoLoaded,
     vehicleLimit,
     activeProductIds,
     purchasing,
