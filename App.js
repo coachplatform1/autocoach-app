@@ -17,6 +17,7 @@ import { TRANSLATIONS } from './src/translations/TRANSLATIONS';
 import { COLORS } from './src/constants/colors';
 import { VEHICLE_LIMITS } from './src/constants/products';
 import { useRevenueCat } from './src/hooks/useRevenueCat';
+import { useTrialNotifications, cancelNonTrialNotifications } from './src/hooks/useTrialNotifications';
 import { SOW_TRANSLATIONS } from './src/translations/SowTranslations';
 import SupportChat from './src/components/SupportChat';
 import ScannerCamera from './src/components/ScannerCamera';
@@ -406,7 +407,7 @@ export default function App() {
   const [fuelLog, setFuelLog]                 = useState([]);
   
   const T = (key) => TRANSLATIONS[key]?.[lang] ?? key;
-  const { isPro, isTrial, vehicleLimit, purchaseProduct, restorePurchases } = useRevenueCat(T);
+  const { isPro, isTrial, trialStartDate, customerInfoLoaded, vehicleLimit, purchaseProduct, restorePurchases } = useRevenueCat(T);
   
   const [cameraPermission, setCameraPermission] = useState(null);
   const [checkingGate, setCheckingGate]       = useState(true);
@@ -424,6 +425,24 @@ export default function App() {
   const [showInAppReviewPrompt, setShowInAppReviewPrompt] = useState(false);
   const [reviewStep, setReviewStep]                       = useState('prompt'); // 'prompt' | 'feedback'
   const [reviewFeedbackText, setReviewFeedbackText]       = useState('');
+
+  useTrialNotifications({
+    isTrial,
+    isPro,
+    customerInfoLoaded,
+    trialStartDate,
+    lang,
+    enabled: notificationsEnabled,
+    skipSteps: vehicles.length > 0 ? ['first_vehicle'] : [],
+    onOpen: target => {
+      if (target === 'addVehicle') {
+        if (vehicles.length === 0) handleAddVehiclePress();
+        else setActiveTab('garage');
+      } else {
+        setActiveTab(target);
+      }
+    },
+  });
 
   // Track subscription date for review prompt trigger
   useEffect(() => {
@@ -886,7 +905,8 @@ export default function App() {
     const granted = await hasNotificationPermission();
     if (!granted) return;
 
-    await Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
+    // Leaves the trial nudges (managed by useTrialNotifications) in place.
+    await cancelNonTrialNotifications();
 
     for (const vehicle of vehicles) {
       const vKey = `${vehicle.year}_${vehicle.make}_${vehicle.model}`;
