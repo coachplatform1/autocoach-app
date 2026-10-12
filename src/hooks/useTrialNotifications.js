@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,6 +20,9 @@ const DAY  = 24 * HOUR;
 
 export const TRIAL_START_KEY = 'trial_start_date';
 const INACTIVE_CUTOFF_MS     = 4 * DAY;
+const MINUTE                 = 60000;
+// Hidden test mode: holds the fake trial start (ms) while it's on.
+export const TEST_MODE_KEY   = 'trial_notif_test_start';
 const NOTIF_KIND             = 'trial_nudge';
 // Matches the channel the maintenance reminders use (app.json defaultChannel).
 const CHANNEL_ID             = 'maintenance-reminders';
@@ -101,6 +104,36 @@ async function resolveTrialStart(rcTrialStart) {
   return start;
 }
 
+// Test mode compresses the sequence: the 6-hour step fires after 1 minute
+// and each "day" lasts 2 minutes (day 3 -> 6 min, day 6 -> 12 min).
+function testOffset(offsetMs) {
+  return offsetMs < DAY ? MINUTE : (offsetMs / DAY) * 2 * MINUTE;
+}
+
+async function getTestStart() {
+  const raw = await AsyncStorage.getItem(TEST_MODE_KEY);
+  return raw ? parseInt(raw, 10) : null;
+}
+
+async function scheduleSteps({ start, now, lang, skipSteps = [], test }) {
+  const es = lang === 'ES';
+  for (const step of SEQUENCE) {
+    if (!test && skipSteps.includes(step.id)) continue;
+    const fireAt = start + (test ? testOffset(step.offsetMs) : step.offsetMs);
+    if (fireAt <= now) continue;                                  // already past — never send late
+    if (!test && fireAt - now > INACTIVE_CUTOFF_MS) continue;     // scheduled on a later app open, if they come back
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: test ? 'AutoCoach (test)' : 'AutoCoach',
+        body: es ? step.es : step.en,
+        data: { kind: NOTIF_KIND, step: step.id, target: step.target, fireAt, test: !!test },
+        sound: true,
+      },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(fireAt), channelId: CHANNEL_ID },
+    });
+  }
+}
+
 export function useTrialNotifications({
   isTrial,
   isPro,
@@ -114,6 +147,7 @@ export function useTrialNotifications({
   const latest = useRef({});
   latest.current = { isTrial, isPro, customerInfoLoaded, trialStartDate, lang, enabled, skipSteps, onOpen };
   const queue = useRef(Promise.resolve());
+  const [debug, setDebug] = useState(null);
 
   const sync = () => {
     // Serialize runs so a foreground event and a state change can't
@@ -124,37 +158,63 @@ export function useTrialNotifications({
 
   async function runSync() {
     const { isTrial, isPro, customerInfoLoaded, trialStartDate, lang, enabled, skipSteps } = latest.current;
+    const now = Date.now();
+
+    // Hidden test mode: act as if a trial started at the stored time,
+    // regardless of RevenueCat, with the sequence compressed into minutes.
+    const testStart = await getTestStart();
+    if (testStart) {
+      await cancelTrialNotifications();
+      if (enabled && (await hasPermission())) await scheduleSteps({ start: testStart, now, lang, test: true });
+      await refreshDebug();
+      return;
+    }
+
     // Wait for real RevenueCat data — the defaults before the first fetch
     // would otherwise look like "not in trial" and wipe the sequence.
     if (!customerInfoLoaded) return;
 
-    const now = Date.now();
     // Converted to paid (isPro && !isTrial), or trial lapsed: nothing to send.
     if (!isTrial || !isPro) {
       await cancelTrialNotifications();
+      await refreshDebug();
       return;
     }
 
     const start = await resolveTrialStart(trialStartDate);
     await cancelTrialNotifications();
-    if (!enabled || !(await hasPermission())) return;
+    if (enabled && (await hasPermission())) await scheduleSteps({ start, now, lang, skipSteps, test: false });
+    await refreshDebug();
+  }
 
-    const es = lang === 'ES';
-    for (const step of SEQUENCE) {
-      if (skipSteps.includes(step.id)) continue;
-      const fireAt = start + step.offsetMs;
-      if (fireAt <= now) continue;                       // already past — never send late
-      if (fireAt - now > INACTIVE_CUTOFF_MS) continue;   // scheduled on a later app open, if they come back
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'AutoCoach',
-          body: es ? step.es : step.en,
-          data: { kind: NOTIF_KIND, step: step.id, target: step.target },
-          sound: true,
-        },
-        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(fireAt), channelId: CHANNEL_ID },
-      });
-    }
+  // Snapshot of what the app sees, for the hidden test panel in Settings.
+  async function refreshDebug() {
+    try {
+      const { isTrial, isPro, customerInfoLoaded } = latest.current;
+      const [perm, scheduled, storedStart, testStart] = await Promise.all([
+        Notifications.getPermissionsAsync(),
+        Notifications.getAllScheduledNotificationsAsync(),
+        AsyncStorage.getItem(TRIAL_START_KEY),
+        getTestStart(),
+      ]);
+      const next = {
+        testMode: !!testStart,
+        permission: perm.status,
+        customerInfoLoaded,
+        isTrial,
+        isPro,
+      enabled: latest.current.enabled,
+        trialStart: testStart || (storedStart ? parseInt(storedStart, 10) : null),
+        scheduled: scheduled
+          .map(n => n?.content?.data)
+          .filter(d => d?.kind === NOTIF_KIND)
+          .map(d => ({ step: d.step, at: d.fireAt }))
+          .sort((a, b) => a.at - b.at),
+      };
+      // Only update when something changed — a state change re-renders App,
+      // which remounts the nested screens (and resets their scroll position).
+      setDebug(prev => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+    } catch {}
   }
 
   useEffect(() => {
@@ -185,4 +245,20 @@ export function useTrialNotifications({
     const sub = Notifications.addNotificationResponseReceivedListener(handle);
     return () => sub.remove();
   }, []);
+
+  const startTest = async () => {
+    // A deliberate tap in Settings, so asking for permission here is fine.
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') await Notifications.requestPermissionsAsync();
+    await AsyncStorage.setItem(TEST_MODE_KEY, String(Date.now()));
+    return sync();
+  };
+
+  const stopTest = async () => {
+    await AsyncStorage.removeItem(TEST_MODE_KEY);
+    await cancelTrialNotifications();   // the real sequence (if any) is rebuilt by sync
+    return sync();
+  };
+
+  return { debug, startTest, stopTest, refreshDebug: sync };
 }

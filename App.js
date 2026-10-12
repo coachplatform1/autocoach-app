@@ -18,6 +18,7 @@ import { COLORS } from './src/constants/colors';
 import { VEHICLE_LIMITS } from './src/constants/products';
 import { useRevenueCat } from './src/hooks/useRevenueCat';
 import { useTrialNotifications, cancelNonTrialNotifications } from './src/hooks/useTrialNotifications';
+import TrialTestPanel from './src/components/TrialTestPanel';
 import { SOW_TRANSLATIONS } from './src/translations/SowTranslations';
 import SupportChat from './src/components/SupportChat';
 import ScannerCamera from './src/components/ScannerCamera';
@@ -426,7 +427,7 @@ export default function App() {
   const [reviewStep, setReviewStep]                       = useState('prompt'); // 'prompt' | 'feedback'
   const [reviewFeedbackText, setReviewFeedbackText]       = useState('');
 
-  useTrialNotifications({
+  const { debug: trialDebug, startTest, stopTest, refreshDebug } = useTrialNotifications({
     isTrial,
     isPro,
     customerInfoLoaded,
@@ -443,6 +444,19 @@ export default function App() {
       }
     },
   });
+  // Hidden trial-notification test panel: tap the version in Settings 7 times.
+  // Kept at App() level so taps survive SettingsScreen remounting.
+  const [showTrialTest, setShowTrialTest] = useState(false);
+  const versionTaps = useRef([]);
+  function handleVersionTap() {
+    const now = Date.now();
+    versionTaps.current = [...versionTaps.current.filter(t => now - t < 3000), now];
+    if (versionTaps.current.length >= 7) {
+      versionTaps.current = [];
+      setShowTrialTest(v => !v);
+      refreshDebug();
+    }
+  }
 
   // Track subscription date for review prompt trigger
   useEffect(() => {
@@ -3048,9 +3062,21 @@ export default function App() {
         <Text style={{ textAlign: 'center', fontSize: 12, color: COLORS.textMuted, marginTop: 20 }}>
           AutoCoach™
         </Text>
-        <Text style={s.settingsVersion} onLongPress={() => setShowReviewModal(true)} delayLongPress={800}>
+        <Text style={s.settingsVersion} onPress={handleVersionTap} onLongPress={() => setShowReviewModal(true)} delayLongPress={800} suppressHighlighting>
           {T('settings_version')} {APP_VERSION}
         </Text>
+
+        {(showTrialTest || trialDebug?.testMode) && (
+          <View style={{ marginBottom: 24 }}>
+            <TrialTestPanel
+              debug={trialDebug}
+              onStart={startTest}
+              onStop={stopTest}
+              onRefresh={refreshDebug}
+              colors={{ bg: COLORS.cardBg, text: COLORS.textPrimary, muted: COLORS.textMuted, accent: COLORS.accent, border: COLORS.border }}
+            />
+          </View>
+        )}
       </ScrollView>
 
       {/* Hidden store-reviewer bypass — see handleReviewCodeSubmit comment above */}
