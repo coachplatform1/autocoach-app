@@ -410,17 +410,30 @@ export default function App() {
   // the plan card + trial disclosure + CTA. Lives here because PaywallScreen()
   // is called as a plain function, not mounted as a component.
   const [paywallFeaturesOpen, setPaywallFeaturesOpen] = useState(false);
+  // 'free' when the paywall was opened by the free-vehicle gate; swaps the subtitle.
+  const [paywallReason, setPaywallReason] = useState(null);
+  // Non-subscribers get one free vehicle and its maintenance schedule.
+  const [freeVehicleUsed, setFreeVehicleUsed] = useState(false);
   const paywallScrollRef     = useRef(null);
   const paywallAutoScrolled  = useRef(false);
   useEffect(() => {
     if (activeTab !== 'paywall') {
       paywallAutoScrolled.current = false;
       setPaywallFeaturesOpen(false);
+      setPaywallReason(null);
     }
   }, [activeTab]);
   
   const T = (key) => TRANSLATIONS[key]?.[lang] ?? key;
   const { isPro, isTrial, trialStartDate, customerInfoLoaded, vehicleLimit, purchaseProduct, restorePurchases } = useRevenueCat(T);
+  // Gates apply only once RevenueCat has answered: isPro isn't cached, so
+  // subscribers read as non-Pro for a moment after launch.
+  const gateActive = customerInfoLoaded && !isPro;
+  const GATED_TABS = ['shop', 'history', 'fuel'];
+  function openFreePaywall() {
+    setPaywallReason('free');
+    setActiveTab('paywall');
+  }
   
   const [cameraPermission, setCameraPermission] = useState(null);
   const [checkingGate, setCheckingGate]       = useState(true);
@@ -573,6 +586,7 @@ export default function App() {
     AsyncStorage.getItem('autocoach_completed_recalls').then(s => { if (s) setCompletedRecalls(JSON.parse(s)); });
     AsyncStorage.getItem('autocoach_documents').then(s => { if (s) setDocuments(JSON.parse(s)); });
     AsyncStorage.getItem('autocoach_subscribed_tier').then(s => { if (s) setCurrentTier(s); });
+    AsyncStorage.getItem('autocoach_free_vehicle_used').then(s => { if (s === 'true') setFreeVehicleUsed(true); });
     // Settings preferences
     AsyncStorage.getItem('autocoach_units').then(s => { if (s) setUnits(s); });
     AsyncStorage.getItem('autocoach_mileage_interval').then(s => { if (s) setMileageInterval(parseInt(s, 10) || 1000); });
@@ -654,20 +668,6 @@ export default function App() {
     AsyncStorage.setItem('autocoach_disclaimer_agreed', 'true').catch(err =>
       console.error('Could not save disclaimer flag:', err)
     );
-    maybeShowFirstLaunchPaywall();
-  }
-
-  // One-time paywall right after the disclaimer on first launch. The flag
-  // is written before navigating, so a crash or relaunch can't show it twice.
-  async function maybeShowFirstLaunchPaywall() {
-    try {
-      const shown = await AsyncStorage.getItem('autocoach_paywall_first_launch_shown');
-      if (shown === 'true' || isPro) return;
-      await AsyncStorage.setItem('autocoach_paywall_first_launch_shown', 'true');
-      setActiveTab('paywall');
-    } catch (e) {
-      console.warn('First-launch paywall check failed', e);
-    }
   }
 
   function saveVehicles(updated) {
@@ -982,6 +982,10 @@ export default function App() {
   }
 
   function addVehicle(vehicle) {
+    if (gateActive) {
+      setFreeVehicleUsed(true);
+      AsyncStorage.setItem('autocoach_free_vehicle_used', 'true');
+    }
     const isFirstVehicle = vehicles.length === 0;
     const updated = [...vehicles, vehicle];
     saveVehicles(updated);
@@ -1009,6 +1013,12 @@ export default function App() {
   // so anyone without an active subscription (or who's hit their tier's
   // vehicle limit) gets routed to the paywall instead of the add-vehicle form.
   function handleAddVehiclePress() {
+    // One free vehicle for non-subscribers; anything more needs the trial.
+    if (gateActive) {
+      if (vehicles.length === 0 && !freeVehicleUsed) setActiveTab('addVehicle');
+      else openFreePaywall();
+      return;
+    }
     if (vehicles.length >= vehicleLimit) {
       setActiveTab('paywall');
     } else {
@@ -1166,13 +1176,13 @@ export default function App() {
     switch (activeTab) {
       case 'garage':        return <GarageScreen />;
       case 'schedule':      return <ScheduleScreen />;
-      case 'shop':          return <ShopScreen />;
+      case 'shop':          return gateActive ? PaywallScreen() : <ShopScreen />;
       case 'paywall':       return PaywallScreen();
       case 'settings':      return <SettingsScreen />;
       case 'documents':     return <DocumentsScreen />;
       case 'accidentChecklist': return <AccidentChecklistScreen />;
-      case 'history':       return <HistoryScreen />;
-      case 'fuel':          return <FuelScreen />;
+      case 'history':       return gateActive ? PaywallScreen() : <HistoryScreen />;
+      case 'fuel':          return gateActive ? PaywallScreen() : <FuelScreen />;
       case 'addVehicle':    return <AddVehicleScreen />;
       case 'serviceDetail': return <ServiceDetailScreen />;
       default:              return <GarageScreen />;
@@ -1752,6 +1762,7 @@ export default function App() {
     const vKey   = `${activeVehicle.year}_${activeVehicle.make}_${activeVehicle.model}`;
 
     function handleLogService() {
+      if (gateActive) { openFreePaywall(); return; }
       const miles = parseInt(mileageInput.replace(/,/g, ''));
       if (!miles || miles < 1) {
         Alert.alert('', lang === 'EN' ? 'Please enter the mileage when this service was done.' : 'Por favor ingresa el kilometraje cuando se realizó el servicio.');
@@ -2730,7 +2741,11 @@ export default function App() {
         </TouchableOpacity>
 
         <Text style={s.screenTitle}>{T('paywall_title')}</Text>
-        <Text style={s.paywallSubtitle}>{T('paywall_subtitle')}</Text>
+        <Text style={s.paywallSubtitle}>
+          {gateActive && (paywallReason === 'free' || GATED_TABS.includes(activeTab))
+            ? T('paywall_subtitle_free')
+            : T('paywall_subtitle')}
+        </Text>
 
         <View style={s.card}>
           {paywallFeaturesOpen && [1, 2, 3, 4, 5, 6, 7].map(n => (

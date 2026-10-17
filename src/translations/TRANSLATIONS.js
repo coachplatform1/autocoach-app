@@ -147,6 +147,10 @@ export const TRANSLATIONS = {
     EN: "AutoCoach Pro",
     ES: "AutoCoach Pro",
   },
+  paywall_subtitle_free: {
+    EN: "Start your free trial to track services, log fuel, find parts, and manage your full garage.",
+    ES: "Comienza tu prueba gratis para registrar servicios, anotar combustible, encontrar piezas y administrar todo tu garaje.",
+  },
   paywall_subtitle: {
     EN: "Full vehicle maintenance intelligence for less than a cup of coffee a month.",
     ES: "Inteligencia completa de mantenimiento vehicular por menos que una taza de café al mes.",
