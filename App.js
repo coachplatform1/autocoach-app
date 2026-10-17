@@ -406,6 +406,18 @@ export default function App() {
   const [serviceHistory, setServiceHistory]   = useState({});
   const [selectedService, setSelectedService] = useState(null);
   const [fuelLog, setFuelLog]                 = useState([]);
+  // Paywall: feature list starts collapsed, and the screen opens scrolled to
+  // the plan card + trial disclosure + CTA. Lives here because PaywallScreen()
+  // is called as a plain function, not mounted as a component.
+  const [paywallFeaturesOpen, setPaywallFeaturesOpen] = useState(false);
+  const paywallScrollRef     = useRef(null);
+  const paywallAutoScrolled  = useRef(false);
+  useEffect(() => {
+    if (activeTab !== 'paywall') {
+      paywallAutoScrolled.current = false;
+      setPaywallFeaturesOpen(false);
+    }
+  }, [activeTab]);
   
   const T = (key) => TRANSLATIONS[key]?.[lang] ?? key;
   const { isPro, isTrial, trialStartDate, customerInfoLoaded, vehicleLimit, purchaseProduct, restorePurchases } = useRevenueCat(T);
@@ -2708,7 +2720,11 @@ export default function App() {
   // ─────────────────────────────────────────────
   function PaywallScreen() {
     return (
-      <ScrollView style={s.screen} contentContainerStyle={s.screenContent}>
+      <ScrollView
+        ref={paywallScrollRef}
+        style={s.screen}
+        contentContainerStyle={s.screenContent}
+      >
         <TouchableOpacity style={s.backBtn} onPress={() => setActiveTab('garage')}>
           <Text style={s.backBtnText}>← {T('btn_back')}</Text>
         </TouchableOpacity>
@@ -2717,19 +2733,32 @@ export default function App() {
         <Text style={s.paywallSubtitle}>{T('paywall_subtitle')}</Text>
 
         <View style={s.card}>
-          {[1, 2, 3, 4, 5, 6, 7].map(n => (
+          {paywallFeaturesOpen && [1, 2, 3, 4, 5, 6, 7].map(n => (
             <View key={n} style={s.paywallFeatureRow}>
               <Text style={s.paywallFeatureCheck}>✓</Text>
               <Text style={s.paywallFeatureText}>{T(`paywall_feature_${n}`)}</Text>
             </View>
           ))}
+          <TouchableOpacity onPress={() => setPaywallFeaturesOpen(v => !v)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={[s.paywallFooterLink, { textAlign: 'center', paddingVertical: 4 }]}>
+              {T(paywallFeaturesOpen ? 'paywall_features_hide' : 'paywall_features_show')}
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        <FleetPricingCalculator
-          lang={lang}
-          onSubscribe={handleSubscribe}
-          onContact={handleEnterpriseContact}
-        />
+        <View onLayout={e => {
+          // Scroll once, on open, so the plan + disclosure + Start Free Trial are on screen.
+          if (paywallAutoScrolled.current) return;
+          paywallAutoScrolled.current = true;
+          const y = Math.max(0, e.nativeEvent.layout.y - 12);
+          requestAnimationFrame(() => paywallScrollRef.current?.scrollTo({ y, animated: false }));
+        }}>
+          <FleetPricingCalculator
+            lang={lang}
+            onSubscribe={handleSubscribe}
+            onContact={handleEnterpriseContact}
+          />
+        </View>
 
         <View style={[s.paywallFooterRow, { flexWrap: 'wrap', paddingHorizontal: 20 }]}>
           <TouchableOpacity onPress={handleRestorePurchases} hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}>

@@ -468,6 +468,14 @@ export const TRANSLATIONS = {
     EN: "Annual total (2 months free)",
     ES: "Total anual (2 meses gratis)",
   },
+  paywall_features_show: {
+    EN: "See everything included ▾",
+    ES: "Ver todo lo incluido ▾",
+  },
+  paywall_features_hide: {
+    EN: "Hide features ▴",
+    ES: "Ocultar funciones ▴",
+  },
   paywall_feature_1: {
     EN: "Exact maintenance schedule for your vehicle",
     ES: "Programa de mantenimiento exacto para tu vehículo",
@@ -509,8 +517,8 @@ export const TRANSLATIONS = {
     ES: "Restaurar Compra",
   },
   paywall_terms: {
-    EN: "Subscription renews automatically. Cancel anytime.",
-    ES: "La suscripción se renueva automáticamente. Cancela en cualquier momento.",
+    EN: "Subscription automatically renews unless canceled at least 24 hours before the end of the current period.",
+    ES: "La suscripción se renueva automáticamente a menos que se cancele al menos 24 horas antes del final del período actual.",
   },
   paywall_no_free_tier: {
     EN: "AutoCoach is a premium app. No free tier.",
