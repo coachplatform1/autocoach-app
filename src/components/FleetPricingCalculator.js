@@ -42,6 +42,7 @@ import {
   ScrollView,
   StyleSheet,
   Linking,
+  Platform,
 } from 'react-native';
 import { TRANSLATIONS } from '../translations/TRANSLATIONS';
 
@@ -340,19 +341,6 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
           {/* Vehicle count */}
           <Text style={s.vehicleCount}>{tierVehicles(activeTier.id)}</Text>
 
-          {/* 7-Day Free Trial Notice */}
-          <View style={{ backgroundColor: '#FFF3E0', borderRadius: 8, padding: 10, marginBottom: 10 }}>
-            <Text style={{ fontSize: 12, color: '#BF360C', fontWeight: '600', lineHeight: 17 }}>
-              {billingCycle === 'annual'
-                ? (lang === 'EN'
-                    ? `7-day free trial, then $${activeTier.annual.toFixed(2)}/year. Cancel anytime.`
-                    : `Prueba gratis de 7 dias, luego $${activeTier.annual.toFixed(2)}/ano. Cancela cuando quieras.`)
-                : (lang === 'EN'
-                    ? `7-day free trial, then $${activeTier.price.toFixed(2)}/month. Cancel anytime.`
-                    : `Prueba gratis de 7 dias, luego $${activeTier.price.toFixed(2)}/mes. Cancela cuando quieras.`)}
-            </Text>
-          </View>
-
           {/* Annual savings line */}
           <View style={s.annualRow}>
             <Text style={s.annualText}>
@@ -451,6 +439,28 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
 
       {/* Divider */}
       <View style={s.divider} />
+
+      {/* 7-Day Free Trial disclosure — sits directly above the CTA so the
+          trial length, price, auto-renewal and cancellation terms are all
+          visible next to the button (Google Play / App Store requirement). */}
+      {!isEnterprise && activeTier && (
+        <View style={s.trialBox}>
+          <Text style={s.trialHeadline}>
+            {billingCycle === 'annual'
+              ? (lang === 'EN'
+                  ? `7-day free trial, then $${activeTier.annual.toFixed(2)}/year.`
+                  : `Prueba gratis de 7 días, luego $${activeTier.annual.toFixed(2)}/año.`)
+              : (lang === 'EN'
+                  ? `7-day free trial, then $${activeTier.price.toFixed(2)}/month.`
+                  : `Prueba gratis de 7 días, luego $${activeTier.price.toFixed(2)}/mes.`)}
+          </Text>
+          <Text style={s.trialTerms}>
+            {lang === 'EN'
+              ? `Subscription automatically renews unless canceled at least 24 hours before the end of the current period. Cancel anytime in ${Platform.OS === 'ios' ? 'Settings → Apple ID → Subscriptions' : 'Google Play Store → Subscriptions'}.`
+              : `La suscripción se renueva automáticamente a menos que se cancele al menos 24 horas antes del final del período actual. Cancela en cualquier momento en ${Platform.OS === 'ios' ? 'Ajustes → ID de Apple → Suscripciones' : 'Google Play Store → Suscripciones'}.`}
+          </Text>
+        </View>
+      )}
 
       {/* Primary CTA */}
       <TouchableOpacity style={s.primaryBtn} onPress={handlePrimary} activeOpacity={0.85}>
@@ -765,6 +775,26 @@ const s = StyleSheet.create({
     height: 0.5,
     backgroundColor: BORDER,
     marginVertical: 14,
+  },
+
+  // Trial disclosure
+  trialBox: {
+    backgroundColor: '#FFF3E0',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+  },
+  trialHeadline: {
+    fontSize: 13,
+    color: '#BF360C',
+    fontWeight: '700',
+    lineHeight: 18,
+    marginBottom: 4,
+  },
+  trialTerms: {
+    fontSize: 12,
+    color: '#BF360C',
+    lineHeight: 17,
   },
 
   // CTA buttons
