@@ -425,10 +425,11 @@ export default function App() {
   }, [activeTab]);
   
   const T = (key) => TRANSLATIONS[key]?.[lang] ?? key;
-  const { isPro, isTrial, trialStartDate, customerInfoLoaded, vehicleLimit, purchaseProduct, restorePurchases } = useRevenueCat(T);
-  // Gates apply only once RevenueCat has answered: isPro isn't cached, so
-  // subscribers read as non-Pro for a moment after launch.
-  const gateActive = customerInfoLoaded && !isPro;
+  const { isPro, isTrial, trialStartDate, customerInfoLoaded, customerInfoSettled, vehicleLimit, purchaseProduct, restorePurchases } = useRevenueCat(T);
+  // Gates apply once the RevenueCat check has finished (isPro isn't cached, so
+  // subscribers read as non-Pro for a moment after launch). If the check fails
+  // or times out, gates still apply rather than unlocking everything.
+  const gateActive = customerInfoSettled && !isPro;
   const GATED_TABS = ['shop', 'history', 'fuel'];
   function openFreePaywall() {
     setPaywallReason('free');

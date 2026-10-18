@@ -19,6 +19,10 @@ export function useRevenueCat(T = (key) => key) {
   // False until the first real getCustomerInfo() resolves, so consumers can
   // tell "not in a trial" apart from "haven't heard from RevenueCat yet".
   const [customerInfoLoaded, setCustomerInfoLoaded] = useState(false);
+  // True once the first RevenueCat check has finished one way or another:
+  // loaded, failed, or timed out. Paywall gates key off this, so a failed or
+  // hung check keeps features locked instead of leaving them all open.
+  const [customerInfoSettled, setCustomerInfoSettled] = useState(false);
   const [vehicleLimit, setVehicleLimit] = useState(0);
   const [activeProductIds, setActiveProductIds] = useState([]);
   const [purchasing, setPurchasing] = useState(false);
@@ -79,6 +83,7 @@ export function useRevenueCat(T = (key) => key) {
   };
 
   useEffect(() => {
+    const settleTimer = setTimeout(() => setCustomerInfoSettled(true), 8000);
     const setupRevenueCat = async () => {
       try {
         if (Platform.OS === 'ios') {
@@ -95,16 +100,19 @@ export function useRevenueCat(T = (key) => key) {
         const customerInfo = await Purchases.getCustomerInfo();
         updateStateFromCustomerInfo(customerInfo);
         setCustomerInfoLoaded(true);
+        setCustomerInfoSettled(true);
         
         // Listen for real-time updates
         Purchases.addCustomerInfoUpdateListener(updateStateFromCustomerInfo);
       } catch (e) {
         console.warn('Error setting up RevenueCat', e);
+        setCustomerInfoSettled(true);
       }
     };
     setupRevenueCat();
 
     return () => {
+      clearTimeout(settleTimer);
       Purchases.removeCustomerInfoUpdateListener(updateStateFromCustomerInfo);
     };
   }, []);
@@ -200,6 +208,7 @@ export function useRevenueCat(T = (key) => key) {
     isTrial,
     trialStartDate,
     customerInfoLoaded,
+    customerInfoSettled,
     vehicleLimit,
     activeProductIds,
     purchasing,
