@@ -410,7 +410,7 @@ export const TRANSLATIONS = {
   calc_vehicles_enterprise: { EN: "21+ vehicles", ES: "21+ vehículos" },
 
   // Annual savings lines (dynamic — suffix appended in code)
-  calc_annual_prefix: { EN: "Annual: $", ES: "Anual: $" },
+  calc_annual_prefix: { EN: "Annual: ", ES: "Anual: " },
   calc_annual_suffix: { EN: "/yr", ES: "/año" },
   calc_annual_saves: { EN: "save", ES: "ahorra" },
   calc_annual_saves_pill: { EN: "Annual saves $", ES: "Anual ahorra $" },

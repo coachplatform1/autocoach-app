@@ -425,7 +425,7 @@ export default function App() {
   }, [activeTab]);
   
   const T = (key) => TRANSLATIONS[key]?.[lang] ?? key;
-  const { isPro, isTrial, trialStartDate, customerInfoLoaded, customerInfoSettled, vehicleLimit, purchaseProduct, restorePurchases } = useRevenueCat(T);
+  const { isPro, isTrial, trialStartDate, customerInfoLoaded, customerInfoSettled, storePrices, pricesLoading, pricesError, reloadPrices, vehicleLimit, purchaseProduct, restorePurchases } = useRevenueCat(T);
   // Gates apply once the RevenueCat check has finished (isPro isn't cached, so
   // subscribers read as non-Pro for a moment after launch). If the check fails
   // or times out, gates still apply rather than unlocking everything.
@@ -2773,6 +2773,10 @@ export default function App() {
             lang={lang}
             onSubscribe={handleSubscribe}
             onContact={handleEnterpriseContact}
+            storePrices={storePrices}
+            pricesLoading={pricesLoading}
+            pricesError={pricesError}
+            onRetryPrices={reloadPrices}
           />
         </View>
 

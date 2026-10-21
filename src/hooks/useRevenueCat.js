@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Platform, Alert } from 'react-native';
 import Purchases from 'react-native-purchases';
+import { RC_PRODUCTS } from '../constants/products';
 
 const VEHICLE_LIMITS = {
   autocoach_solo: 1,
@@ -23,6 +24,12 @@ export function useRevenueCat(T = (key) => key) {
   // loaded, failed, or timed out. Paywall gates key off this, so a failed or
   // hung check keeps features locked instead of leaving them all open.
   const [customerInfoSettled, setCustomerInfoSettled] = useState(false);
+  // Localized store prices keyed by product ID ('autocoach_solo_monthly' ->
+  // { priceString, price, currencyCode }). The paywall shows only these —
+  // never hardcoded USD — so the price matches the store's checkout.
+  const [storePrices, setStorePrices] = useState({});
+  const [pricesLoading, setPricesLoading] = useState(true);
+  const [pricesError, setPricesError] = useState(false);
   const [vehicleLimit, setVehicleLimit] = useState(0);
   const [activeProductIds, setActiveProductIds] = useState([]);
   const [purchasing, setPurchasing] = useState(false);
@@ -82,6 +89,27 @@ export function useRevenueCat(T = (key) => key) {
     }
   };
 
+  const loadPrices = async () => {
+    setPricesLoading(true);
+    setPricesError(false);
+    try {
+      const products = await Purchases.getProducts(Object.values(RC_PRODUCTS));
+      const map = {};
+      products.forEach(p => {
+        // Android IDs come back as 'autocoach_solo_monthly:monthly-base'.
+        const id = p.identifier.split(':')[0];
+        if (!map[id]) map[id] = { priceString: p.priceString, price: p.price, currencyCode: p.currencyCode };
+      });
+      setStorePrices(map);
+      if (products.length === 0) setPricesError(true);
+    } catch (e) {
+      console.warn('Error loading store prices', e);
+      setPricesError(true);
+    } finally {
+      setPricesLoading(false);
+    }
+  };
+
   useEffect(() => {
     const settleTimer = setTimeout(() => setCustomerInfoSettled(true), 8000);
     const setupRevenueCat = async () => {
@@ -108,6 +136,7 @@ export function useRevenueCat(T = (key) => key) {
         console.warn('Error setting up RevenueCat', e);
         setCustomerInfoSettled(true);
       }
+      loadPrices();
     };
     setupRevenueCat();
 
@@ -209,6 +238,10 @@ export function useRevenueCat(T = (key) => key) {
     trialStartDate,
     customerInfoLoaded,
     customerInfoSettled,
+    storePrices,
+    pricesLoading,
+    pricesError,
+    reloadPrices: loadPrices,
     vehicleLimit,
     activeProductIds,
     purchasing,

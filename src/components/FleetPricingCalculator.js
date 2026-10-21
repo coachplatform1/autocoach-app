@@ -43,6 +43,7 @@ import {
   StyleSheet,
   Linking,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { TRANSLATIONS } from '../translations/TRANSLATIONS';
 
@@ -135,7 +136,10 @@ function calcEnterprise(qty) {
 // ─────────────────────────────────────────────
 // COMPONENT
 // ─────────────────────────────────────────────
-export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onContact }) {
+export default function FleetPricingCalculator({
+  lang = 'EN', onSubscribe, onContact,
+  storePrices = {}, pricesLoading = false, pricesError = false, onRetryPrices,
+}) {
   const [selectedId, setSelectedId]   = useState('solo');
   const [billingCycle, setBilling]    = useState('monthly'); // 'monthly' | 'annual'
   const [enterpriseQty, setQty]       = useState(ENTERPRISE_MIN);
@@ -147,6 +151,13 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
   const isEnterprise = selectedId === 'enterprise';
   const activeTier   = TIERS.find(t => t.id === selectedId);
   const ent          = calcEnterprise(enterpriseQty);
+
+  // Prices shown on the paywall come only from the store (localized, with
+  // the right currency). The numbers in TIERS are for ordering, never shown.
+  const monthlyStore = activeTier ? storePrices[activeTier.rcMonthly] : null;
+  const annualStore  = activeTier ? storePrices[activeTier.rcAnnual]  : null;
+  const cycleStore   = billingCycle === 'annual' ? annualStore : monthlyStore;
+  const pricesReady  = !!(monthlyStore && annualStore);
 
   // ── Stepper handlers ──────────────────────
   function handleQtyChange(delta) {
@@ -185,24 +196,16 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
       return;
     }
     if (!activeTier || !onSubscribe) return;
-    const rcId = billingCycle === 'annual' ? activeTier.rcAnnual : activeTier.rcMonthly;
-    const price = billingCycle === 'annual' ? activeTier.annual : activeTier.price;
-    onSubscribe(rcId, price);
-  }
-
-  function handleSecondary() {
-    if (isEnterprise) {
-      // Learn more — no action needed at launch
+    if (!cycleStore) {
+      if (!pricesLoading && onRetryPrices) onRetryPrices();
       return;
     }
-    if (!activeTier || !onSubscribe) return;
-    // Toggle to annual if currently monthly, vice versa
-    const newCycle = billingCycle === 'monthly' ? 'annual' : 'monthly';
-    setBilling(newCycle);
-    const rcId = newCycle === 'annual' ? activeTier.rcAnnual : activeTier.rcMonthly;
-    const price = newCycle === 'annual' ? activeTier.annual : activeTier.price;
-    onSubscribe(rcId, price);
+    const rcId = billingCycle === 'annual' ? activeTier.rcAnnual : activeTier.rcMonthly;
+    onSubscribe(rcId, cycleStore.price);
   }
+
+  // Secondary button only renders for Enterprise ("Learn more").
+  function handleSecondary() {}
 
   // ── Chip row data ─────────────────────────
   const chips = [
@@ -247,9 +250,17 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
     return map[id] ?? '';
   }
 
-  function annualSavings(tier) {
-    const saved = parseFloat(((tier.price * 12) - tier.annual).toFixed(2));
-    return `${T('calc_annual_saves')} $${saved.toFixed(2)}`;
+  function annualSavings() {
+    if (!pricesReady) return '';
+    const saved = monthlyStore.price * 12 - annualStore.price;
+    if (!(saved > 0)) return '';
+    let amount;
+    try {
+      amount = new Intl.NumberFormat(undefined, { style: 'currency', currency: monthlyStore.currencyCode }).format(saved);
+    } catch {
+      amount = saved.toFixed(2);
+    }
+    return `${T('calc_annual_saves')} ${amount}`;
   }
 
   // ── Breakdown string ──────────────────────
@@ -257,22 +268,18 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
     const vWord = ent.extra === 1
       ? `1 ${T('calc_breakdown_vehicle_singular')}`
       : `${ent.extra} ${T('calc_breakdown_vehicle_plural')}`;
-    return `${T('calc_breakdown_base')}: $${ENTERPRISE_BASE.toFixed(2)}  +  ${vWord} × $${ENTERPRISE_PER.toFixed(2)} = $${(ent.extra * ENTERPRISE_PER).toFixed(2)}`;
+    return `${T('calc_breakdown_base')}: $${ENTERPRISE_BASE.toFixed(2)}  +  ${vWord} × $${ENTERPRISE_PER.toFixed(2)} = $${(ent.extra * ENTERPRISE_PER).toFixed(2)} USD`;
   }
 
   // ── Primary button label ──────────────────
   function primaryLabel() {
     if (isEnterprise) return T('calc_cta_enterprise');
+    if (!cycleStore && !pricesLoading) return lang === 'EN' ? 'Try Again' : 'Reintentar';
     return lang === 'EN' ? 'Start Free Trial' : 'Iniciar Prueba Gratis';
   }
 
   function secondaryLabel() {
-    if (isEnterprise) return T('calc_cta_enterprise_learn');
-    if (!activeTier) return '';
-    if (billingCycle === 'monthly') {
-      return `${T('calc_cta_annual_prefix')}${activeTier.annual.toFixed(2)}${T('calc_cta_annual_suffix')}`;
-    }
-    return `${T('calc_cta_subscribe_prefix')}${activeTier.price.toFixed(2)}${T('calc_cta_subscribe_suffix')}`;
+    return T('calc_cta_enterprise_learn');
   }
 
   // ─────────────────────────────────────────
@@ -326,11 +333,15 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
 
           {/* Price */}
           <View style={s.priceRow}>
-            <Text style={s.priceLarge}>
-              ${billingCycle === 'annual'
-                ? activeTier.annual.toFixed(2)
-                : activeTier.price.toFixed(2)}
-            </Text>
+            {cycleStore ? (
+              <Text style={s.priceLarge}>{cycleStore.priceString}</Text>
+            ) : pricesLoading ? (
+              <ActivityIndicator size="small" color={DARK} style={{ marginVertical: 10 }} />
+            ) : (
+              <Text style={s.priceUnavailable}>
+                {lang === 'EN' ? 'Price unavailable' : 'Precio no disponible'}
+              </Text>
+            )}
             <Text style={s.priceSuffix}>
               {billingCycle === 'annual'
                 ? T('calc_cta_annual_suffix')
@@ -342,14 +353,17 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
           <Text style={s.vehicleCount}>{tierVehicles(activeTier.id)}</Text>
 
           {/* Annual savings line */}
+          {annualStore && (
           <View style={s.annualRow}>
             <Text style={s.annualText}>
               {T('calc_annual_prefix')}
-              {activeTier.annual.toFixed(2)}
-              {T('calc_annual_suffix')} — {' '}
-              <Text style={s.annualSavings}>{annualSavings(activeTier)}</Text>
+              {annualStore.priceString}
+              {T('calc_annual_suffix')}
+              {annualSavings() ? ' — ' : ''}
+              <Text style={s.annualSavings}>{annualSavings()}</Text>
             </Text>
           </View>
+          )}
 
           {/* Billing toggle */}
           <View style={s.billingToggle}>
@@ -415,11 +429,11 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
           <View style={s.resultGrid}>
             <View style={s.resultCard}>
               <Text style={s.resultLabel}>{T('calc_monthly_label')}</Text>
-              <Text style={s.resultValue}>${ent.monthly.toFixed(2)}</Text>
+              <Text style={s.resultValue}>${ent.monthly.toFixed(2)} USD</Text>
             </View>
             <View style={s.resultCard}>
               <Text style={s.resultLabel}>{T('calc_annual_label')}</Text>
-              <Text style={s.resultValueMuted}>${ent.annual.toFixed(2)}</Text>
+              <Text style={s.resultValueMuted}>${ent.annual.toFixed(2)} USD</Text>
             </View>
           </View>
 
@@ -431,7 +445,7 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
           {/* Annual savings pill */}
           <View style={s.savingsPill}>
             <Text style={s.savingsPillText}>
-              {T('calc_annual_saves_pill')}{ent.savings.toFixed(2)}
+              {T('calc_annual_saves_pill')}{ent.savings.toFixed(2)} USD
             </Text>
           </View>
         </View>
@@ -443,27 +457,32 @@ export default function FleetPricingCalculator({ lang = 'EN', onSubscribe, onCon
       {/* 7-Day Free Trial disclosure — sits directly above the CTA so the
           trial length, price, auto-renewal and cancellation terms are all
           visible next to the button (Google Play / App Store requirement). */}
-      {!isEnterprise && activeTier && (
+      {!isEnterprise && activeTier && cycleStore && (
         <View style={s.trialBox}>
-          <Text style={s.trialHeadline}>
-            {billingCycle === 'annual'
-              ? (lang === 'EN'
-                  ? `7-day free trial, then $${activeTier.annual.toFixed(2)}/year.`
-                  : `Prueba gratis de 7 días, luego $${activeTier.annual.toFixed(2)}/año.`)
-              : (lang === 'EN'
-                  ? `7-day free trial, then $${activeTier.price.toFixed(2)}/month.`
-                  : `Prueba gratis de 7 días, luego $${activeTier.price.toFixed(2)}/mes.`)}
-          </Text>
           <Text style={s.trialTerms}>
             {lang === 'EN'
-              ? `Subscription automatically renews unless canceled at least 24 hours before the end of the current period. Cancel anytime in ${Platform.OS === 'ios' ? 'Settings → Apple ID → Subscriptions' : 'Google Play Store → Subscriptions'}.`
-              : `La suscripción se renueva automáticamente a menos que se cancele al menos 24 horas antes del final del período actual. Cancela en cualquier momento en ${Platform.OS === 'ios' ? 'Ajustes → ID de Apple → Suscripciones' : 'Google Play Store → Suscripciones'}.`}
+              ? `7-day free trial, then ${cycleStore.priceString}/${billingCycle === 'annual' ? 'year' : 'month'}. Cancel anytime in ${Platform.OS === 'ios' ? 'Settings → Apple ID → Subscriptions' : 'Google Play → Subscriptions'}. Subscription automatically renews unless canceled at least 24 hours before the trial ends.`
+              : `Prueba gratis de 7 días, luego ${cycleStore.priceString}/${billingCycle === 'annual' ? 'año' : 'mes'}. Cancela en cualquier momento en ${Platform.OS === 'ios' ? 'Ajustes → ID de Apple → Suscripciones' : 'Google Play → Suscripciones'}. La suscripción se renueva automáticamente a menos que se cancele al menos 24 horas antes de que termine la prueba.`}
           </Text>
         </View>
       )}
 
+      {/* Prices couldn't be loaded — never fall back to hardcoded prices. */}
+      {!isEnterprise && activeTier && !cycleStore && !pricesLoading && (
+        <Text style={s.priceErrorText}>
+          {lang === 'EN'
+            ? 'Unable to load subscription prices. Check your connection and try again.'
+            : 'No se pudieron cargar los precios de suscripción. Revisa tu conexión e inténtalo de nuevo.'}
+        </Text>
+      )}
+
       {/* Primary CTA */}
-      <TouchableOpacity style={s.primaryBtn} onPress={handlePrimary} activeOpacity={0.85}>
+      <TouchableOpacity
+        style={[s.primaryBtn, !isEnterprise && !cycleStore && pricesLoading && { opacity: 0.5 }]}
+        onPress={handlePrimary}
+        disabled={!isEnterprise && !cycleStore && pricesLoading}
+        activeOpacity={0.85}
+      >
         <Text style={s.primaryBtnText} adjustsFontSizeToFit numberOfLines={1}>{primaryLabel()}</Text>
       </TouchableOpacity>
 
@@ -780,21 +799,28 @@ const s = StyleSheet.create({
   // Trial disclosure
   trialBox: {
     backgroundColor: '#FFF3E0',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 10,
-  },
-  trialHeadline: {
-    fontSize: 13,
-    color: '#BF360C',
-    fontWeight: '700',
-    lineHeight: 18,
-    marginBottom: 4,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#E85D04',
+    padding: 14,
+    marginBottom: 12,
   },
   trialTerms: {
-    fontSize: 12,
+    fontSize: 15,
     color: '#BF360C',
-    lineHeight: 17,
+    fontWeight: '700',
+    lineHeight: 21,
+  },
+  priceUnavailable: {
+    fontSize: 16,
+    color: GRAY,
+    marginVertical: 8,
+  },
+  priceErrorText: {
+    fontSize: 13,
+    color: '#BF360C',
+    textAlign: 'center',
+    marginBottom: 10,
   },
 
   // CTA buttons
